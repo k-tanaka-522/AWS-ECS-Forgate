@@ -21,7 +21,7 @@
   },
   {
     "ParameterKey": "DBPassword",
-    "ParameterValue": "CHANGE_THIS_PASSWORD"
+    "ParameterValue": "{{resolve:secretsmanager:dev/escforgate/db-password:SecretString}}"
   },
   {
     "ParameterKey": "UserPoolName",
@@ -29,7 +29,7 @@
   },
   {
     "ParameterKey": "ContainerImage",
-    "ParameterValue": "CHANGE_THIS_TO_YOUR_ECR_IMAGE"
+    "ParameterValue": "{{resolve:secretsmanager:dev/escforgate/container-image}}"
   },
   {
     "ParameterKey": "ContainerPort",

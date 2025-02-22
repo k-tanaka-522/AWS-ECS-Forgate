@@ -11,6 +11,16 @@ Parameters:
       - prd
     Description: Target environment for the stack
 
+  DBName:
+    Type: String
+    Default: wordpress
+    Description: Database name for WordPress
+
+  DBUsername:
+    Type: String
+    Default: wordpress
+    Description: Database username for WordPress
+
   ContainerImage:
     Type: String
     Description: Docker image for the application container
@@ -61,7 +71,7 @@ Resources:
           - Effect: Allow
             Principal:
               Service: ecs-tasks.amazonaws.com
-            Action: sts:AssumeRoleWithWebIdentity
+            Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
       Policies:
@@ -106,6 +116,9 @@ Resources:
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
+      RuntimePlatform:
+        OperatingSystemFamily: LINUX
+        CpuArchitecture: X86_64
       ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
       TaskRoleArn: !GetAtt TaskRole.Arn
       ContainerDefinitions:
@@ -114,12 +127,45 @@ Resources:
           PortMappings:
             - ContainerPort: !Ref ContainerPort
           Environment:
-            - Name: NODE_ENV
-              Value: !Ref Environment
+            - Name: WORDPRESS_DB_NAME
+              Value: !Ref DBName
+            - Name: WORDPRESS_DB_USER
+              Value: !Ref DBUsername
+            - Name: WORDPRESS_DEBUG
+              Value: "true"
+            - Name: WORDPRESS_SITEURL
+              Value: !Sub https://${Environment}.tk-niigata.com
+            - Name: WORDPRESS_HOME
+              Value: !Sub https://${Environment}.tk-niigata.com
+            - Name: WORDPRESS_AUTH_KEY
+              Value: !Sub '${Environment}-auth-key-${AWS::Region}'
+            - Name: WORDPRESS_SECURE_AUTH_KEY
+              Value: !Sub '${Environment}-secure-auth-key-${AWS::Region}'
+            - Name: WORDPRESS_LOGGED_IN_KEY
+              Value: !Sub '${Environment}-logged-in-key-${AWS::Region}'
+            - Name: WORDPRESS_NONCE_KEY
+              Value: !Sub '${Environment}-nonce-key-${AWS::Region}'
+            - Name: WORDPRESS_AUTH_SALT
+              Value: !Sub '${Environment}-auth-salt-${AWS::Region}'
+            - Name: WORDPRESS_SECURE_AUTH_SALT
+              Value: !Sub '${Environment}-secure-auth-salt-${AWS::Region}'
+            - Name: WORDPRESS_LOGGED_IN_SALT
+              Value: !Sub '${Environment}-logged-in-salt-${AWS::Region}'
+            - Name: WORDPRESS_NONCE_SALT
+              Value: !Sub '${Environment}-nonce-salt-${AWS::Region}'
           Secrets:
-            - Name: DB_SECRET
-              ValueFrom:
-                Fn::ImportValue: !Sub ${Environment}-escforgate-db-secret-arn
+            - Name: WORDPRESS_DB_PASSWORD
+              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${Environment}/wordpress/db-password
+            - Name: WORDPRESS_DB_HOST
+              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${Environment}/wordpress/db-host
+            - Name: COGNITO_USER_POOL_ID
+              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${Environment}/wordpress/cognito-pool-id
+            - Name: COGNITO_CLIENT_ID
+              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${Environment}/wordpress/cognito-client-id
+            - Name: AWS_ACCESS_KEY_ID
+              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${Environment}/wordpress/aws-access-key
+            - Name: AWS_SECRET_ACCESS_KEY
+              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${Environment}/wordpress/aws-secret-key
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -209,7 +255,7 @@ Resources:
   # ECS Service
   Service:
     Type: AWS::ECS::Service
-    DependsOn: Listener
+    DependsOn: ListenerHTTPS
     Properties:
       ServiceName: !Sub ${Environment}-escforgate-service
       Cluster: !Ref ECSCluster

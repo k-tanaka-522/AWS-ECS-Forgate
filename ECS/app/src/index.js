@@ -66,6 +66,12 @@ app.get('/health', (req, res) => {
 // Test database connection
 app.get('/db-test', async (req, res) => {
   try {
+    console.log('Attempting database connection with config:', {
+      host: process.env.DB_HOST,
+      port: process.env.DB_PORT,
+      user: process.env.DB_USER,
+      database: process.env.DB_NAME
+    });
     const connection = await createDbConnection();
     await connection.ping();
     await connection.end();
@@ -75,7 +81,11 @@ app.get('/db-test', async (req, res) => {
     });
   } catch (error) {
     console.error('Database connection error:', error);
-    res.status(500).json({ error: 'database connection failed' });
+    res.status(500).json({ 
+      error: 'database connection failed',
+      message: error.message,
+      code: error.code
+    });
   }
 });
 

@@ -77,27 +77,69 @@ resource "aws_ecs_task_definition" "main" {
   memory                  = var.task_memory
   execution_role_arn      = aws_iam_role.task_execution.arn
   task_role_arn          = aws_iam_role.task.arn
+  
+  runtime_platform {
+    operating_system_family = "LINUX_64"
+    cpu_architecture       = "X86_64"
+    operating_system_version = "2023"
+  }
 
   container_definitions = jsonencode([
     {
-      name  = "app"
+      name  = "wordpress"
       image = var.container_image
       portMappings = [
         {
-          containerPort = var.container_port
+          containerPort = 80
           protocol      = "tcp"
         }
       ]
       environment = [
         {
-          name  = "NODE_ENV"
-          value = var.environment
+          name  = "WORDPRESS_DB_NAME"
+          value = "wordpress"
+        },
+        {
+          name  = "WORDPRESS_DB_USER"
+          value = "wordpress"
+        },
+        {
+          name  = "WORDPRESS_DEBUG"
+          value = "true"
+        },
+        {
+          name  = "WORDPRESS_SITEURL"
+          value = "https://${var.environment}.tk-niigata.com"
+        },
+        {
+          name  = "WORDPRESS_HOME"
+          value = "https://${var.environment}.tk-niigata.com"
         }
       ]
       secrets = [
         {
-          name      = "DB_SECRET"
-          valueFrom = var.db_secret_arn
+          name      = "WORDPRESS_DB_PASSWORD"
+          valueFrom = "arn:aws:secretsmanager:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:secret:${var.environment}/wordpress/db-password"
+        },
+        {
+          name      = "WORDPRESS_DB_HOST"
+          valueFrom = "arn:aws:secretsmanager:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:secret:${var.environment}/wordpress/db-host"
+        },
+        {
+          name      = "COGNITO_USER_POOL_ID"
+          valueFrom = "arn:aws:secretsmanager:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:secret:${var.environment}/wordpress/cognito-pool-id"
+        },
+        {
+          name      = "COGNITO_CLIENT_ID"
+          valueFrom = "arn:aws:secretsmanager:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:secret:${var.environment}/wordpress/cognito-client-id"
+        },
+        {
+          name      = "AWS_ACCESS_KEY_ID"
+          valueFrom = "arn:aws:secretsmanager:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:secret:${var.environment}/wordpress/aws-access-key"
+        },
+        {
+          name      = "AWS_SECRET_ACCESS_KEY"
+          valueFrom = "arn:aws:secretsmanager:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:secret:${var.environment}/wordpress/aws-secret-key"
         }
       ]
       logConfiguration = {

@@ -69,7 +69,7 @@ Resources:
     Properties:
       DBName: !Ref DBName
       Engine: mysql
-      EngineVersion: 8.0.28
+      EngineVersion: 8.0.35
       DBInstanceClass: !Ref DBInstanceClass
       AllocatedStorage: 20
       StorageType: gp3

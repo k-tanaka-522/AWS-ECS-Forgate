@@ -65,9 +65,9 @@ Resources:
       SupportedIdentityProviders:
         - COGNITO
       CallbackURLs:
-        - http://localhost:3000
+        - https://dev.tk-niigata.com/wp-login.php
       LogoutURLs:
-        - http://localhost:3000
+        - https://dev.tk-niigata.com
       AllowedOAuthFlows:
         - code
       AllowedOAuthScopes:

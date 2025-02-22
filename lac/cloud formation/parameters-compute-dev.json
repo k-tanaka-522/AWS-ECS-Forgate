@@ -1,0 +1,34 @@
+[
+  {
+    "ParameterKey": "Environment",
+    "ParameterValue": "dev"
+  },
+  {
+    "ParameterKey": "ContainerImage",
+    "ParameterValue": "{{resolve:secretsmanager:dev/escforgate/container-image}}"
+  },
+  {
+    "ParameterKey": "ContainerPort",
+    "ParameterValue": "3000"
+  },
+  {
+    "ParameterKey": "DesiredCount",
+    "ParameterValue": "2"
+  },
+  {
+    "ParameterKey": "TaskCpu",
+    "ParameterValue": "256"
+  },
+  {
+    "ParameterKey": "TaskMemory",
+    "ParameterValue": "512"
+  },
+  {
+    "ParameterKey": "DBName",
+    "ParameterValue": "escforgate"
+  },
+  {
+    "ParameterKey": "DBUsername",
+    "ParameterValue": "admin"
+  }
+]
