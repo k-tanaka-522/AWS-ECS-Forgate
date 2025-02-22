@@ -1,0 +1,50 @@
+[
+  {
+    "ParameterKey": "Environment",
+    "ParameterValue": "dev"
+  },
+  {
+    "ParameterKey": "VpcCidr",
+    "ParameterValue": "10.0.0.0/16"
+  },
+  {
+    "ParameterKey": "DBInstanceClass",
+    "ParameterValue": "db.t3.small"
+  },
+  {
+    "ParameterKey": "DBName",
+    "ParameterValue": "escforgate"
+  },
+  {
+    "ParameterKey": "DBUsername",
+    "ParameterValue": "admin"
+  },
+  {
+    "ParameterKey": "DBPassword",
+    "ParameterValue": "CHANGE_THIS_PASSWORD"
+  },
+  {
+    "ParameterKey": "UserPoolName",
+    "ParameterValue": "escforgate-users"
+  },
+  {
+    "ParameterKey": "ContainerImage",
+    "ParameterValue": "CHANGE_THIS_TO_YOUR_ECR_IMAGE"
+  },
+  {
+    "ParameterKey": "ContainerPort",
+    "ParameterValue": "3000"
+  },
+  {
+    "ParameterKey": "DesiredCount",
+    "ParameterValue": "2"
+  },
+  {
+    "ParameterKey": "TaskCpu",
+    "ParameterValue": "256"
+  },
+  {
+    "ParameterKey": "TaskMemory",
+    "ParameterValue": "512"
+  }
+]
