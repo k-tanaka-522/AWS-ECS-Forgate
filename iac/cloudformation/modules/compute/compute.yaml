@@ -196,12 +196,17 @@ Resources:
       LaunchType: FARGATE
       NetworkConfiguration:
         AwsvpcConfiguration:
-          AssignPublicIp: ENABLED
+          AssignPublicIp: DISABLED
           SecurityGroups:
             - Fn::ImportValue: !Sub ${Environment}-escforgate-ecs-sg
           Subnets:
             - Fn::ImportValue: !Sub ${Environment}-escforgate-private-subnet-1
             - Fn::ImportValue: !Sub ${Environment}-escforgate-private-subnet-2
+      LoadBalancers:
+        - ContainerName: app
+          ContainerPort: !Ref ContainerPort
+          TargetGroupArn:
+            Fn::ImportValue: !Sub ${Environment}-escforgate-tg-arn
       DeploymentConfiguration:
         MaximumPercent: 200
         MinimumHealthyPercent: 100
