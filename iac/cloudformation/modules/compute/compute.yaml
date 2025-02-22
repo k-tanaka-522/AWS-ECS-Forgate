@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Compute stack for ESCForgate - ECS Fargate and ALB'
+Description: 'Compute stack for ESCForgate - ECS Fargate'
 
 Parameters:
   Environment:
@@ -11,14 +11,19 @@ Parameters:
       - prd
     Description: Target environment for the stack
 
+  DomainName:
+    Type: String
+    Default: tk-niigata.com
+    Description: Base domain name for the application
+
   DBName:
     Type: String
-    Default: wordpress
+    Default: escforgate
     Description: Database name for WordPress
 
   DBUsername:
     Type: String
-    Default: wordpress
+    Default: admin
     Description: Database username for WordPress
 
   ContainerImage:
@@ -83,7 +88,7 @@ Resources:
                 Action:
                   - secretsmanager:GetSecretValue
                 Resource:
-                  - Fn::ImportValue: !Sub ${Environment}-escforgate-db-secret-arn
+                  - !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${Environment}/escforgate/*
 
   # ECS Task Role
   TaskRole:
@@ -134,9 +139,9 @@ Resources:
             - Name: WORDPRESS_DEBUG
               Value: "true"
             - Name: WORDPRESS_SITEURL
-              Value: !Sub https://${Environment}.tk-niigata.com
+              Value: !Sub https://${Environment}.${DomainName}
             - Name: WORDPRESS_HOME
-              Value: !Sub https://${Environment}.tk-niigata.com
+              Value: !Sub https://${Environment}.${DomainName}
             - Name: WORDPRESS_AUTH_KEY
               Value: !Sub '${Environment}-auth-key-${AWS::Region}'
             - Name: WORDPRESS_SECURE_AUTH_KEY
@@ -155,17 +160,17 @@ Resources:
               Value: !Sub '${Environment}-nonce-salt-${AWS::Region}'
           Secrets:
             - Name: WORDPRESS_DB_PASSWORD
-              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${Environment}/wordpress/db-password
+              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${Environment}/escforgate/db-credentials
             - Name: WORDPRESS_DB_HOST
-              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${Environment}/wordpress/db-host
+              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${Environment}/escforgate/db-host
             - Name: COGNITO_USER_POOL_ID
-              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${Environment}/wordpress/cognito-pool-id
+              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${Environment}/escforgate/cognito-pool-id
             - Name: COGNITO_CLIENT_ID
-              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${Environment}/wordpress/cognito-client-id
+              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${Environment}/escforgate/cognito-client-id
             - Name: AWS_ACCESS_KEY_ID
-              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${Environment}/wordpress/aws-access-key
+              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${Environment}/escforgate/aws-access-key
             - Name: AWS_SECRET_ACCESS_KEY
-              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${Environment}/wordpress/aws-secret-key
+              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${Environment}/escforgate/aws-secret-key
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -180,82 +185,9 @@ Resources:
       LogGroupName: !Sub /ecs/${Environment}-escforgate
       RetentionInDays: 14
 
-  # Application Load Balancer
-  LoadBalancer:
-    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
-    Properties:
-      Name: !Sub ${Environment}-escforgate-alb
-      Scheme: internet-facing
-      LoadBalancerAttributes:
-        - Key: idle_timeout.timeout_seconds
-          Value: '60'
-      Subnets:
-        - Fn::ImportValue: !Sub ${Environment}-escforgate-public-subnet-1
-        - Fn::ImportValue: !Sub ${Environment}-escforgate-public-subnet-2
-      SecurityGroups:
-        - Fn::ImportValue: !Sub ${Environment}-escforgate-alb-sg
-
-  # ALB Target Group
-  TargetGroup:
-    Type: AWS::ElasticLoadBalancingV2::TargetGroup
-    Properties:
-      Name: !Sub ${Environment}-escforgate-tg
-      Port: !Ref ContainerPort
-      Protocol: HTTP
-      TargetType: ip
-      VpcId:
-        Fn::ImportValue: !Sub ${Environment}-escforgate-vpc-id
-      HealthCheckPath: /health
-      HealthCheckIntervalSeconds: 30
-      HealthCheckTimeoutSeconds: 5
-      HealthyThresholdCount: 2
-      UnhealthyThresholdCount: 3
-
-  # ACM Certificate
-  Certificate:
-    Type: AWS::CertificateManager::Certificate
-    Properties:
-      DomainName: dev.tk-niigata.com
-      ValidationMethod: DNS
-      Tags:
-        - Key: Name
-          Value: !Sub ${Environment}-escforgate-cert
-
-  # ALB HTTPS Listener
-  ListenerHTTPS:
-    Type: AWS::ElasticLoadBalancingV2::Listener
-    Properties:
-      LoadBalancerArn: !Ref LoadBalancer
-      Port: 443
-      Protocol: HTTPS
-      Certificates:
-        - CertificateArn: !Ref Certificate
-      SslPolicy: ELBSecurityPolicy-2016-08
-      DefaultActions:
-        - Type: forward
-          TargetGroupArn: !Ref TargetGroup
-
-  # ALB HTTP Listener (Redirect to HTTPS)
-  ListenerHTTP:
-    Type: AWS::ElasticLoadBalancingV2::Listener
-    Properties:
-      LoadBalancerArn: !Ref LoadBalancer
-      Port: 80
-      Protocol: HTTP
-      DefaultActions:
-        - Type: redirect
-          RedirectConfig:
-            Protocol: HTTPS
-            Port: "443"
-            Host: "#{host}"
-            Path: "/#{path}"
-            Query: "#{query}"
-            StatusCode: HTTP_301
-
   # ECS Service
   Service:
     Type: AWS::ECS::Service
-    DependsOn: ListenerHTTPS
     Properties:
       ServiceName: !Sub ${Environment}-escforgate-service
       Cluster: !Ref ECSCluster
@@ -264,16 +196,12 @@ Resources:
       LaunchType: FARGATE
       NetworkConfiguration:
         AwsvpcConfiguration:
-          AssignPublicIp: DISABLED
+          AssignPublicIp: ENABLED
           SecurityGroups:
             - Fn::ImportValue: !Sub ${Environment}-escforgate-ecs-sg
           Subnets:
             - Fn::ImportValue: !Sub ${Environment}-escforgate-private-subnet-1
             - Fn::ImportValue: !Sub ${Environment}-escforgate-private-subnet-2
-      LoadBalancers:
-        - ContainerName: app
-          ContainerPort: !Ref ContainerPort
-          TargetGroupArn: !Ref TargetGroup
       DeploymentConfiguration:
         MaximumPercent: 200
         MinimumHealthyPercent: 100
@@ -308,12 +236,6 @@ Resources:
         ScaleOutCooldown: 300
 
 Outputs:
-  LoadBalancerDNS:
-    Description: Load Balancer DNS Name
-    Value: !GetAtt LoadBalancer.DNSName
-    Export:
-      Name: !Sub ${Environment}-escforgate-alb-dns
-
   ServiceName:
     Description: ECS Service Name
     Value: !GetAtt Service.Name

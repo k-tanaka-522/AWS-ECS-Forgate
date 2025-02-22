@@ -126,3 +126,68 @@ aws elbv2 describe-target-health \
 - セキュリティグループの適切な設定
 - NACLによる追加のセキュリティレイヤー
 - VPCエンドポイントの活用
+
+## 7. VPCエンドポイントの設定
+
+### セキュリティグループの設定
+- **インバウンドルール**:
+  - プライベートサブネットのCIDRまたはECSタスクのセキュリティグループからの443ポートアクセスを許可
+  - 必要最小限のアクセス許可
+- **アウトバウンドルール**:
+  - デフォルトで全て許可または特定のセキュリティグループに制限
+
+### ECSタスクのセキュリティグループ設定
+- **インバウンドルール**:
+  - ALBからのアプリケーションポートへのアクセスを許可
+- **アウトバウンドルール**:
+  - VPCエンドポイントへの443ポートアクセスを許可
+  - インターネットアクセスが必要な場合は追加で設定
+
+### よくある問題と対処方法
+- **接続タイムアウト**:
+  - セキュリティグループの相互参照確認
+  - ルートテーブルの設定確認
+  - DNSホスト名とDNSサポートが有効か確認
+- **権限エラー**:
+  - IAMロールのポリシー確認
+  - エンドポイントポリシーの確認
+
+## 8. SecretsManagerの設定
+
+### シークレットの命名規則
+- **推奨形式**: `<環境>/<アプリケーション名>/<用途>-<ランダムサフィックス>`
+- **例**:
+  - dev/wordpress/db-password-abc123
+  - prd/wordpress/api-key-xyz789
+
+### IAMロールの設定
+- **タスク実行ロール**:
+```yaml
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Policies:
+        - PolicyName: SecretsAccess
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${Environment}/${AppName}/*
+```
+
+### タスク定義でのシークレット参照
+```yaml
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      ContainerDefinitions:
+        - Secrets:
+            - Name: DB_PASSWORD
+              ValueFrom: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${Environment}/${AppName}/db-password-xxx
+```
+
+### トラブルシューティング
+- シークレットARNの完全一致確認
+- IAMロールのポリシー範囲確認
+- VPCエンドポイントの接続確認

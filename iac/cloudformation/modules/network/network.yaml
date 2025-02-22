@@ -144,6 +144,15 @@ Resources:
           FromPort: 3000
           ToPort: 3000
           SourceSecurityGroupId: !Ref ALBSecurityGroup
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          DestinationSecurityGroupId: !Ref VPCEndpointSecurityGroup
+        - IpProtocol: -1
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
           Value: !Sub ${Environment}-escforgate-ecs-sg

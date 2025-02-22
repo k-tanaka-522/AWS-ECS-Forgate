@@ -11,6 +11,11 @@ Parameters:
       - prd
     Description: Target environment for the stack
 
+  DomainName:
+    Type: String
+    Default: tk-niigata.com
+    Description: Base domain name for the application
+
   UserPoolName:
     Type: String
     Default: escforgate-users
@@ -65,9 +70,9 @@ Resources:
       SupportedIdentityProviders:
         - COGNITO
       CallbackURLs:
-        - https://dev.tk-niigata.com/wp-login.php
+        - !Sub https://${Environment}.${DomainName}/wp-login.php
       LogoutURLs:
-        - https://dev.tk-niigata.com
+        - !Sub https://${Environment}.${DomainName}
       AllowedOAuthFlows:
         - code
       AllowedOAuthScopes:
