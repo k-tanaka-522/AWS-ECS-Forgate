@@ -1,0 +1,509 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'ECS Fargate Service for ECSForgate Project'
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - stg
+      - prd
+    Description: 環境名（dev/stg/prd）
+
+  AppName:
+    Type: String
+    Default: ecsforgate-api
+    Description: アプリケーション名
+
+  ContainerCpu:
+    Type: Number
+    Default: 512
+    AllowedValues:
+      - 256
+      - 512
+      - 1024
+      - 2048
+      - 4096
+    Description: コンテナに割り当てるCPU単位（1024=1vCPU）
+
+  ContainerMemory:
+    Type: Number
+    Default: 1024
+    AllowedValues:
+      - 512
+      - 1024
+      - 2048
+      - 3072
+      - 4096
+      - 8192
+    Description: コンテナに割り当てるメモリ量（MB）
+
+  TaskCount:
+    Type: Number
+    Default: 1
+    Description: 実行するタスク数
+
+  MaxTaskCount:
+    Type: Number
+    Default: 2
+    Description: 最大タスク数
+
+  ContainerImage:
+    Type: String
+    Description: コンテナイメージURI
+    
+  MultiAzEnabled:
+    Type: String
+    Default: false
+    AllowedValues:
+      - true
+      - false
+    Description: マルチAZ配置を有効にするかどうか
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet::Id
+    Description: プライベートサブネット1
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet::Id
+    Description: プライベートサブネット2
+
+  AlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: ALBセキュリティグループ
+
+  RdsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: RDSセキュリティグループ
+
+Conditions:
+  IsProduction: !Equals [ !Ref EnvironmentName, 'prd' ]
+  IsMultiAz: !Equals [ !Ref MultiAzEnabled, 'true' ]
+  UseFargateSpot: !And [ !Not [ !Condition IsProduction ], !Equals [ !Ref EnvironmentName, 'dev' ] ]
+
+Resources:
+  # ECSクラスタ
+  EcsCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub 'ecsforgate-${EnvironmentName}-cluster'
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
+      Tags:
+        - Key: Project
+          Value: ECSForgate
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # タスク実行ロール
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'ecsforgate-${EnvironmentName}-task-execution-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: SecretsManagerAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:ecsforgate/${EnvironmentName}/*'
+
+  # タスクロール
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'ecsforgate-${EnvironmentName}-task-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: RdsAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - rds:*
+                Resource: '*'
+        - PolicyName: CloudWatchMetrics
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricData
+                Resource: '*'
+        - PolicyName: XRayAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                Resource: '*'
+
+  # ECSセキュリティグループ
+  EcsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for ECS Fargate tasks
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          SourceSecurityGroupId: !Ref AlbSecurityGroup
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          DestinationSecurityGroupId: !Ref RdsSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub 'ecsforgate-${EnvironmentName}-ecs-sg'
+        - Key: Project
+          Value: ECSForgate
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # CloudWatch Logsグループ
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/ecs/ecsforgate-api-${EnvironmentName}'
+      RetentionInDays: !If [ IsProduction, 90, !If [ !Equals [ !Ref EnvironmentName, 'stg' ], 30, 14 ] ]
+      Tags:
+        - Key: Project
+          Value: ECSForgate
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # ECSタスク定義
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub 'ecsforgate-api-${EnvironmentName}'
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: !Ref ContainerCpu
+      Memory: !Ref ContainerMemory
+      ContainerDefinitions:
+        - Name: api-container
+          Image: !Ref ContainerImage
+          Essential: true
+          PortMappings:
+            - ContainerPort: 8080
+              HostPort: 8080
+              Protocol: tcp
+          Environment:
+            - Name: SPRING_PROFILES_ACTIVE
+              Value: !Ref EnvironmentName
+            - Name: JAVA_OPTS
+              Value: !If [ IsProduction, '-Xms512m -Xmx1536m -XX:+UseG1GC', '-Xms256m -Xmx1024m -XX:+UseG1GC' ]
+            - Name: APP_LOG_LEVEL
+              Value: !If [ IsProduction, 'WARN', 'INFO' ]
+          Secrets:
+            - Name: SPRING_DATASOURCE_URL
+              ValueFrom: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:ecsforgate/${EnvironmentName}/db-connection-string'
+            - Name: SPRING_DATASOURCE_USERNAME
+              ValueFrom: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:ecsforgate/${EnvironmentName}/db-username'
+            - Name: SPRING_DATASOURCE_PASSWORD
+              ValueFrom: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:ecsforgate/${EnvironmentName}/db-password'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - curl -f http://localhost:8080/api/health || exit 1
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 60
+      Tags:
+        - Key: Project
+          Value: ECSForgate
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ECSサービス
+  EcsService:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: !Sub 'ecsforgate-api-${EnvironmentName}-service'
+      Cluster: !Ref EcsCluster
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount: !Ref TaskCount
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+      LaunchType: FARGATE
+      SchedulingStrategy: REPLICA
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !Ref EcsSecurityGroup
+          Subnets: !If
+            - IsMultiAz
+            - - !Ref PrivateSubnet1
+              - !Ref PrivateSubnet2
+            - - !Ref PrivateSubnet1
+      LoadBalancers:
+        - ContainerName: api-container
+          ContainerPort: 8080
+          TargetGroupArn: !Ref TargetGroup
+      HealthCheckGracePeriodSeconds: 120
+      EnableECSManagedTags: true
+      PropagateTags: SERVICE
+      Tags:
+        - Key: Project
+          Value: ECSForgate
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ターゲットグループ
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub 'ecsforgate-${EnvironmentName}-tg'
+      VpcId: !Ref VpcId
+      Port: 8080
+      Protocol: HTTP
+      TargetType: ip
+      HealthCheckPath: /api/health
+      HealthCheckEnabled: true
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 3
+      UnhealthyThresholdCount: 2
+      HealthCheckProtocol: HTTP
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '60'
+      Tags:
+        - Key: Project
+          Value: ECSForgate
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # Auto Scalingターゲット
+  ScalableTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: !Ref MaxTaskCount
+      MinCapacity: !Ref TaskCount
+      ResourceId: !Join
+        - /
+        - - service
+          - !Ref EcsCluster
+          - !GetAtt EcsService.Name
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+      RoleARN: !Sub 'arn:aws:iam::${AWS::AccountId}:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService'
+
+  # Auto Scalingポリシー（CPU使用率ベース）
+  CpuScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub 'ecsforgate-${EnvironmentName}-cpu-scaling-policy'
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+        TargetValue: 70.0
+        ScaleInCooldown: 300
+        ScaleOutCooldown: 300
+
+  # Auto Scalingポリシー（リクエスト数ベース）- 本番環境のみ
+  RequestCountScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Condition: IsProduction
+    Properties:
+      PolicyName: !Sub 'ecsforgate-${EnvironmentName}-request-count-scaling-policy'
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ALBRequestCountPerTarget
+          ResourceLabel: !Join
+            - /
+            - - !GetAtt LoadBalancer.LoadBalancerFullName
+              - !GetAtt TargetGroup.TargetGroupFullName
+        TargetValue: 800.0
+        ScaleInCooldown: 300
+        ScaleOutCooldown: 300
+
+  # ALB
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub 'ecsforgate-${EnvironmentName}-alb'
+      Scheme: internal
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value: '60'
+      SecurityGroups:
+        - !Ref AlbSecurityGroup
+      Subnets: !If
+        - IsMultiAz
+        - - !Ref PrivateSubnet1
+          - !Ref PrivateSubnet2
+        - - !Ref PrivateSubnet1
+      Tags:
+        - Key: Project
+          Value: ECSForgate
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # HTTP リスナー
+  HttpListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+  # CloudWatch アラーム - CPU使用率
+  CpuAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'ecsforgate-${EnvironmentName}-high-cpu'
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 2
+      MetricName: CPUUtilization
+      Namespace: AWS/ECS
+      Period: 300
+      Statistic: Average
+      Threshold: 80
+      AlarmDescription: !Sub 'High CPU utilization for ${AppName} in ${EnvironmentName} environment'
+      Dimensions:
+        - Name: ClusterName
+          Value: !Ref EcsCluster
+        - Name: ServiceName
+          Value: !GetAtt EcsService.Name
+      TreatMissingData: notBreaching
+
+  # CloudWatch アラーム - ヘルスチェック
+  HealthAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'ecsforgate-${EnvironmentName}-unhealthy-hosts'
+      ComparisonOperator: LessThanThreshold
+      EvaluationPeriods: 2
+      MetricName: HealthyHostCount
+      Namespace: AWS/ApplicationELB
+      Period: 60
+      Statistic: Average
+      Threshold: !Ref TaskCount
+      AlarmDescription: !Sub 'Unhealthy hosts detected for ${AppName} in ${EnvironmentName} environment'
+      Dimensions:
+        - Name: TargetGroup
+          Value: !GetAtt TargetGroup.TargetGroupFullName
+        - Name: LoadBalancer
+          Value: !GetAtt LoadBalancer.LoadBalancerFullName
+      TreatMissingData: breaching
+
+  # CloudWatch アラーム - 5XXエラー
+  ErrorRateAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'ecsforgate-${EnvironmentName}-high-error-rate'
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 1
+      MetricName: HTTPCode_Target_5XX_Count
+      Namespace: AWS/ApplicationELB
+      Period: 60
+      Statistic: Sum
+      Threshold: 10
+      AlarmDescription: !Sub 'High 5XX error rate for ${AppName} in ${EnvironmentName} environment'
+      Dimensions:
+        - Name: TargetGroup
+          Value: !GetAtt TargetGroup.TargetGroupFullName
+        - Name: LoadBalancer
+          Value: !GetAtt LoadBalancer.LoadBalancerFullName
+      TreatMissingData: notBreaching
+
+Outputs:
+  ClusterName:
+    Description: ECSクラスタ名
+    Value: !Ref EcsCluster
+    Export:
+      Name: !Sub '${AWS::StackName}-ClusterName'
+
+  ServiceName:
+    Description: ECSサービス名
+    Value: !GetAtt EcsService.Name
+    Export:
+      Name: !Sub '${AWS::StackName}-ServiceName'
+
+  TaskDefinitionArn:
+    Description: タスク定義ARN
+    Value: !Ref TaskDefinition
+    Export:
+      Name: !Sub '${AWS::StackName}-TaskDefinitionArn'
+
+  TargetGroupArn:
+    Description: ターゲットグループARN
+    Value: !Ref TargetGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-TargetGroupArn'
+
+  LoadBalancerDNS:
+    Description: ロードバランサーDNS名
+    Value: !GetAtt LoadBalancer.DNSName
+    Export:
+      Name: !Sub '${AWS::StackName}-LoadBalancerDNS'
+
+  LoadBalancerUrl:
+    Description: ロードバランサーURL
+    Value: !Sub 'http://${LoadBalancer.DNSName}'
+    Export:
+      Name: !Sub '${AWS::StackName}-LoadBalancerUrl'

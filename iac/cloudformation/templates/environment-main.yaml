@@ -1,0 +1,286 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'ECSForgate プロジェクト メインスタック - 環境: {{環境名}}'
+
+# -----------------------------------------------------
+# パラメータ定義
+# -----------------------------------------------------
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - stg
+      - prd
+    Description: 環境名（dev/stg/prd）
+
+  ArtifactBucket:
+    Type: String
+    Description: CloudFormationテンプレートを格納するS3バケット名
+
+  # --------------------------------------------------
+  # ネットワーク関連パラメータ
+  # --------------------------------------------------
+  VpcCidr:
+    Type: String
+    Default: 10.0.0.0/16
+    Description: VPCのCIDRブロック
+
+  PublicSubnet1Cidr:
+    Type: String
+    Default: 10.0.101.0/24
+    Description: パブリックサブネット1のCIDRブロック
+
+  PublicSubnet2Cidr:
+    Type: String
+    Default: 10.0.102.0/24
+    Description: パブリックサブネット2のCIDRブロック
+
+  PrivateSubnet1Cidr:
+    Type: String
+    Default: 10.0.1.0/24
+    Description: プライベートサブネット1のCIDRブロック
+
+  PrivateSubnet2Cidr:
+    Type: String
+    Default: 10.0.2.0/24
+    Description: プライベートサブネット2のCIDRブロック
+
+  # --------------------------------------------------
+  # データベース関連パラメータ
+  # --------------------------------------------------
+  DbInstanceClass:
+    Type: String
+    Default: db.t3.small
+    AllowedValues:
+      - db.t3.small
+      - db.t3.medium
+      - db.t3.large
+    Description: DBインスタンスクラス
+
+  DbAllocatedStorage:
+    Type: Number
+    Default: 20
+    MinValue: 20
+    MaxValue: 100
+    Description: ストレージサイズ(GB)
+
+  DbMultiAZ:
+    Type: String
+    Default: false
+    AllowedValues:
+      - true
+      - false
+    Description: マルチAZデプロイの有効化
+
+  # --------------------------------------------------
+  # ECS関連パラメータ
+  # --------------------------------------------------
+  EcsTaskCpu:
+    Type: String
+    Default: 1024
+    AllowedValues:
+      - 256
+      - 512
+      - 1024
+      - 2048
+      - 4096
+    Description: ECSタスクのCPUユニット
+
+  EcsTaskMemory:
+    Type: String
+    Default: 2048
+    AllowedValues:
+      - 512
+      - 1024
+      - 2048
+      - 3072
+      - 4096
+      - 8192
+    Description: ECSタスクのメモリ(MB)
+
+  EcsTaskDesiredCount:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 10
+    Description: ECSタスクの希望実行数
+
+  EcsTaskMaxCount:
+    Type: Number
+    Default: 2
+    MinValue: 1
+    MaxValue: 20
+    Description: ECSタスクの最大数
+
+# -----------------------------------------------------
+# 条件と環境マッピング
+# -----------------------------------------------------
+Conditions:
+  UseDualAZ: !Or 
+    - !Equals [!Ref EnvironmentName, stg]
+    - !Equals [!Ref EnvironmentName, prd]
+
+Mappings:
+  EnvironmentMap:
+    dev:
+      LogRetention: 14
+      BackupRetention: 7
+      MonitoringInterval: 0
+    stg:
+      LogRetention: 30
+      BackupRetention: 14
+      MonitoringInterval: 60
+    prd:
+      LogRetention: 90
+      BackupRetention: 30
+      MonitoringInterval: 30
+
+# -----------------------------------------------------
+# リソース定義
+# -----------------------------------------------------
+Resources:
+  # --------------------------------------------------
+  # ネットワークスタック
+  # --------------------------------------------------
+  NetworkStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${ArtifactBucket}.s3.${AWS::Region}.amazonaws.com/cloudformation/templates/nested/network.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        VpcCidr: !Ref VpcCidr
+        PublicSubnet1Cidr: !Ref PublicSubnet1Cidr
+        PublicSubnet2Cidr: !Ref PublicSubnet2Cidr
+        PrivateSubnet1Cidr: !Ref PrivateSubnet1Cidr
+        PrivateSubnet2Cidr: !Ref PrivateSubnet2Cidr
+        UseDualAZ: !If [UseDualAZ, 'true', 'false']
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # --------------------------------------------------
+  # データベーススタック
+  # --------------------------------------------------
+  DatabaseStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: NetworkStack
+    Properties:
+      TemplateURL: !Sub https://${ArtifactBucket}.s3.${AWS::Region}.amazonaws.com/cloudformation/templates/nested/database.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        VpcId: !GetAtt NetworkStack.Outputs.VpcId
+        PrivateSubnet1Id: !GetAtt NetworkStack.Outputs.PrivateSubnet1Id
+        PrivateSubnet2Id: !GetAtt NetworkStack.Outputs.PrivateSubnet2Id
+        DBSecurityGroupId: !GetAtt NetworkStack.Outputs.DBSecurityGroupId
+        DbInstanceClass: !Ref DbInstanceClass
+        DbAllocatedStorage: !Ref DbAllocatedStorage
+        DbMultiAZ: !Ref DbMultiAZ
+        BackupRetentionPeriod: !FindInMap [EnvironmentMap, !Ref EnvironmentName, BackupRetention]
+        MonitoringInterval: !FindInMap [EnvironmentMap, !Ref EnvironmentName, MonitoringInterval]
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # --------------------------------------------------
+  # コンピューティングスタック
+  # --------------------------------------------------
+  ComputingStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: 
+      - NetworkStack
+      - DatabaseStack
+    Properties:
+      TemplateURL: !Sub https://${ArtifactBucket}.s3.${AWS::Region}.amazonaws.com/cloudformation/templates/nested/computing.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        VpcId: !GetAtt NetworkStack.Outputs.VpcId
+        PublicSubnet1Id: !GetAtt NetworkStack.Outputs.PublicSubnet1Id
+        PublicSubnet2Id: !GetAtt NetworkStack.Outputs.PublicSubnet2Id
+        PrivateSubnet1Id: !GetAtt NetworkStack.Outputs.PrivateSubnet1Id
+        PrivateSubnet2Id: !GetAtt NetworkStack.Outputs.PrivateSubnet2Id
+        EcsSecurityGroupId: !GetAtt NetworkStack.Outputs.EcsSecurityGroupId
+        AlbSecurityGroupId: !GetAtt NetworkStack.Outputs.AlbSecurityGroupId
+        DbEndpoint: !GetAtt DatabaseStack.Outputs.DbEndpoint
+        DbName: !GetAtt DatabaseStack.Outputs.DbName
+        EcsTaskCpu: !Ref EcsTaskCpu
+        EcsTaskMemory: !Ref EcsTaskMemory
+        EcsTaskDesiredCount: !Ref EcsTaskDesiredCount
+        EcsTaskMaxCount: !Ref EcsTaskMaxCount
+        LogRetention: !FindInMap [EnvironmentMap, !Ref EnvironmentName, LogRetention]
+        UseDualAZ: !If [UseDualAZ, 'true', 'false']
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # --------------------------------------------------
+  # 監視スタック
+  # --------------------------------------------------
+  MonitoringStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: ComputingStack
+    Properties:
+      TemplateURL: !Sub https://${ArtifactBucket}.s3.${AWS::Region}.amazonaws.com/cloudformation/templates/nested/monitoring.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        EcsClusterName: !GetAtt ComputingStack.Outputs.EcsClusterName
+        EcsServiceName: !GetAtt ComputingStack.Outputs.EcsServiceName
+        LoadBalancerArn: !GetAtt ComputingStack.Outputs.LoadBalancerArn
+        TargetGroupArn: !GetAtt ComputingStack.Outputs.TargetGroupArn
+        DbInstanceId: !GetAtt DatabaseStack.Outputs.DbInstanceId
+        LogRetention: !FindInMap [EnvironmentMap, !Ref EnvironmentName, LogRetention]
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: ManagedBy
+          Value: CloudFormation
+
+# -----------------------------------------------------
+# 出力定義
+# -----------------------------------------------------
+Outputs:
+  StackName:
+    Description: メインスタック名
+    Value: !Ref AWS::StackName
+
+  Environment:
+    Description: 環境名
+    Value: !Ref EnvironmentName
+
+  VpcId:
+    Description: VPC ID
+    Value: !GetAtt NetworkStack.Outputs.VpcId
+
+  ApiEndpoint:
+    Description: API Endpoint URL
+    Value: !GetAtt ComputingStack.Outputs.ApiEndpoint
+
+  ApiEndpointDns:
+    Description: API Endpoint DNS
+    Value: !GetAtt ComputingStack.Outputs.LoadBalancerDnsName
+
+  DatabaseEndpoint:
+    Description: Database Endpoint
+    Value: !GetAtt DatabaseStack.Outputs.DbEndpoint
+
+  EcsClusterName:
+    Description: ECS Cluster Name
+    Value: !GetAtt ComputingStack.Outputs.EcsClusterName
+
+  EcsServiceName:
+    Description: ECS Service Name
+    Value: !GetAtt ComputingStack.Outputs.EcsServiceName

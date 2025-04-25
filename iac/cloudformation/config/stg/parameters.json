@@ -1,0 +1,58 @@
+[
+  {
+    "ParameterKey": "EnvironmentName",
+    "ParameterValue": "stg"
+  },
+  {
+    "ParameterKey": "ArtifactBucket",
+    "ParameterValue": "ecsforgate-cfn-templates-${AWS_ACCOUNT_ID}"
+  },
+  {
+    "ParameterKey": "VpcCidr",
+    "ParameterValue": "10.1.0.0/16"
+  },
+  {
+    "ParameterKey": "PublicSubnet1Cidr",
+    "ParameterValue": "10.1.101.0/24"
+  },
+  {
+    "ParameterKey": "PublicSubnet2Cidr",
+    "ParameterValue": "10.1.102.0/24"
+  },
+  {
+    "ParameterKey": "PrivateSubnet1Cidr",
+    "ParameterValue": "10.1.1.0/24"
+  },
+  {
+    "ParameterKey": "PrivateSubnet2Cidr",
+    "ParameterValue": "10.1.2.0/24"
+  },
+  {
+    "ParameterKey": "DbInstanceClass",
+    "ParameterValue": "db.t3.medium"
+  },
+  {
+    "ParameterKey": "DbAllocatedStorage",
+    "ParameterValue": "30"
+  },
+  {
+    "ParameterKey": "DbMultiAZ",
+    "ParameterValue": "true"
+  },
+  {
+    "ParameterKey": "EcsTaskCpu",
+    "ParameterValue": "1024"
+  },
+  {
+    "ParameterKey": "EcsTaskMemory",
+    "ParameterValue": "2048"
+  },
+  {
+    "ParameterKey": "EcsTaskDesiredCount",
+    "ParameterValue": "2"
+  },
+  {
+    "ParameterKey": "EcsTaskMaxCount",
+    "ParameterValue": "5"
+  }
+]

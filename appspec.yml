@@ -1,0 +1,28 @@
+version: 0.0
+Resources:
+  - TargetService:
+      Type: AWS::ECS::Service
+      Properties:
+        TaskDefinition: <TASK_DEFINITION>
+        LoadBalancerInfo:
+          ContainerName: api-container
+          ContainerPort: 8080
+        PlatformVersion: LATEST
+
+Hooks:
+  - BeforeInstall: 
+      - Location: scripts/before_install.sh
+        Timeout: 300
+        RulesEvaluationMode: ANY 
+  - AfterInstall:
+      - Location: scripts/after_install.sh
+        Timeout: 300
+  - AfterAllowTestTraffic:
+      - Location: scripts/run_tests.sh
+        Timeout: 300
+  - BeforeAllowTraffic:
+      - Location: scripts/before_traffic.sh
+        Timeout: 300
+  - AfterAllowTraffic:
+      - Location: scripts/after_traffic.sh
+        Timeout: 300

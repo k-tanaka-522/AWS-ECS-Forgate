@@ -1,0 +1,64 @@
+# Java関連
+*.class
+*.jar
+*.war
+*.ear
+*.zip
+*.tar.gz
+*.rar
+hs_err_pid*
+.mtj.tmp/
+
+# Gradle関連
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+gradle-app.setting
+.gradletasknamecache
+
+# IntelliJ関連
+.idea/
+*.iws
+*.iml
+*.ipr
+out/
+
+# Eclipse関連
+.classpath
+.project
+.settings/
+bin/
+
+# VS Code関連
+.vscode/
+.code-workspace
+
+# Mac OS関連
+.DS_Store
+
+# Windows関連
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# AWS関連
+.aws/
+*.aws.json
+.env
+packaged-template.yaml
+samconfig.toml
+
+# ローカル設定ファイル
+application-local.yml
+application-local.properties
+
+# ログファイル
+*.log
+logs/
+
+# その他のバイナリファイル
+*.bin
+*.db
+
+# Docker
+.dockerignore

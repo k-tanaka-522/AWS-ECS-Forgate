@@ -1,0 +1,167 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'ECSForgate プロジェクト コンピューティングスタック - 環境: {{環境名}}'
+
+# -----------------------------------------------------
+# パラメータ定義
+# -----------------------------------------------------
+Parameters:
+  EnvironmentName:
+    Type: String
+    Description: 環境名（dev/stg/prd）
+
+  ArtifactBucket:
+    Type: String
+    Description: CloudFormationテンプレートを格納するS3バケット名
+
+  # ネットワーク関連パラメータ
+  VpcId:
+    Type: String
+    Description: VPC ID
+
+  PublicSubnet1Id:
+    Type: String
+    Description: パブリックサブネット1 ID
+
+  PublicSubnet2Id:
+    Type: String
+    Description: パブリックサブネット2 ID
+
+  PrivateSubnet1Id:
+    Type: String
+    Description: プライベートサブネット1 ID
+
+  PrivateSubnet2Id:
+    Type: String
+    Description: プライベートサブネット2 ID
+
+  EcsSecurityGroupId:
+    Type: String
+    Description: ECSセキュリティグループID
+
+  AlbSecurityGroupId:
+    Type: String
+    Description: ALBセキュリティグループID
+
+  # データベース関連パラメータ
+  DbEndpoint:
+    Type: String
+    Description: データベースエンドポイント
+
+  DbName:
+    Type: String
+    Description: データベース名
+
+  # ECS関連パラメータ
+  EcsTaskCpu:
+    Type: String
+    Description: ECSタスクのCPUユニット
+
+  EcsTaskMemory:
+    Type: String
+    Description: ECSタスクのメモリ(MB)
+
+  EcsTaskDesiredCount:
+    Type: Number
+    Description: ECSタスクの希望実行数
+
+  EcsTaskMaxCount:
+    Type: Number
+    Description: ECSタスクの最大数
+
+  # 監視・ログ関連パラメータ
+  LogRetention:
+    Type: Number
+    Description: ログ保持期間（日数）
+
+  UseDualAZ:
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: デュアルAZデプロイの有効化
+
+# -----------------------------------------------------
+# リソース定義
+# -----------------------------------------------------
+Resources:
+  # --------------------------------------------------
+  # ALBスタック
+  # --------------------------------------------------
+  AlbStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${ArtifactBucket}.s3.${AWS::Region}.amazonaws.com/cloudformation/templates/nested/alb.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        VpcId: !Ref VpcId
+        PublicSubnet1Id: !Ref PublicSubnet1Id
+        PublicSubnet2Id: !Ref PublicSubnet2Id
+        AlbSecurityGroupId: !Ref AlbSecurityGroupId
+        UseDualAZ: !Ref UseDualAZ
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # --------------------------------------------------
+  # ECSスタック
+  # --------------------------------------------------
+  EcsStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: AlbStack
+    Properties:
+      TemplateURL: !Sub https://${ArtifactBucket}.s3.${AWS::Region}.amazonaws.com/cloudformation/templates/nested/ecs.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        VpcId: !Ref VpcId
+        PrivateSubnet1Id: !Ref PrivateSubnet1Id
+        PrivateSubnet2Id: !Ref PrivateSubnet2Id
+        EcsSecurityGroupId: !Ref EcsSecurityGroupId
+        TargetGroupArn: !GetAtt AlbStack.Outputs.TargetGroupArn
+        DbEndpoint: !Ref DbEndpoint
+        DbName: !Ref DbName
+        EcsTaskCpu: !Ref EcsTaskCpu
+        EcsTaskMemory: !Ref EcsTaskMemory
+        EcsTaskDesiredCount: !Ref EcsTaskDesiredCount
+        EcsTaskMaxCount: !Ref EcsTaskMaxCount
+        LogRetention: !Ref LogRetention
+        UseDualAZ: !Ref UseDualAZ
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: ManagedBy
+          Value: CloudFormation
+
+# -----------------------------------------------------
+# 出力定義
+# -----------------------------------------------------
+Outputs:
+  EcsClusterName:
+    Description: ECS Cluster Name
+    Value: !GetAtt EcsStack.Outputs.EcsClusterName
+
+  EcsServiceName:
+    Description: ECS Service Name
+    Value: !GetAtt EcsStack.Outputs.EcsServiceName
+
+  LoadBalancerArn:
+    Description: Load Balancer ARN
+    Value: !GetAtt AlbStack.Outputs.LoadBalancerArn
+
+  LoadBalancerDnsName:
+    Description: Load Balancer DNS Name
+    Value: !GetAtt AlbStack.Outputs.LoadBalancerDnsName
+
+  TargetGroupArn:
+    Description: Target Group ARN
+    Value: !GetAtt AlbStack.Outputs.TargetGroupArn
+
+  ApiEndpoint:
+    Description: API Endpoint
+    Value: !Sub http://${AlbStack.Outputs.LoadBalancerDnsName}

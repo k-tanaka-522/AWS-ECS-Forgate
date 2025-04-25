@@ -1,11 +1,26 @@
 # ビルドステージ
-FROM adoptopenjdk:11-jdk-hotspot AS build
+FROM ubuntu:22.04 AS build
+
+# 必要なパッケージのインストール
+RUN apt-get update && apt-get install -y \
+    openjdk-11-jdk \
+    curl \
+    unzip \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 COPY . .
 RUN ./gradlew clean build -x test
 
 # 実行ステージ
-FROM adoptopenjdk:11-jre-hotspot
+FROM ubuntu:22.04
+
+# 必要なパッケージのインストール
+RUN apt-get update && apt-get install -y \
+    openjdk-11-jre-headless \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 COPY --from=build /app/build/libs/*.jar app.jar
 
