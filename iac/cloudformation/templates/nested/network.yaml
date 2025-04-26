@@ -1,0 +1,972 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'ECSForgate プロジェクト ネットワークスタック - 環境: {{環境名}}'
+
+# -----------------------------------------------------
+# パラメータ定義
+# -----------------------------------------------------
+Parameters:
+  EnvironmentName:
+    Type: String
+    Description: 環境名（dev/stg/prd）
+
+  VpcCidr:
+    Type: String
+    Default: 10.0.0.0/16
+    Description: VPCのCIDRブロック
+
+  PublicSubnet1Cidr:
+    Type: String
+    Default: 10.0.0.0/24
+    Description: パブリックサブネット1用のCIDRブロック
+
+  PublicSubnet2Cidr:
+    Type: String
+    Default: 10.0.1.0/24
+    Description: パブリックサブネット2用のCIDRブロック
+
+  PrivateSubnet1Cidr:
+    Type: String
+    Default: 10.0.10.0/24
+    Description: プライベートサブネット1用のCIDRブロック（アプリケーション層）
+
+  PrivateSubnet2Cidr:
+    Type: String
+    Default: 10.0.11.0/24
+    Description: プライベートサブネット2用のCIDRブロック（アプリケーション層）
+
+  PrivateDataSubnet1Cidr:
+    Type: String
+    Default: 10.0.20.0/24
+    Description: プライベートデータサブネット1用のCIDRブロック
+
+  PrivateDataSubnet2Cidr:
+    Type: String
+    Default: 10.0.21.0/24
+    Description: プライベートデータサブネット2用のCIDRブロック
+
+  UseDualAZ:
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: マルチAZ構成を有効にするかどうか（開発環境では無効）
+
+# -----------------------------------------------------
+# マッピング
+# -----------------------------------------------------
+Mappings:
+  AZConfig:
+    ap-northeast-1:
+      AZ1: ap-northeast-1a
+      AZ2: ap-northeast-1c
+
+# -----------------------------------------------------
+# 条件
+# -----------------------------------------------------
+Conditions:
+  IsMultiAZ: !Equals [!Ref UseDualAZ, 'true']
+
+# -----------------------------------------------------
+# リソース定義
+# -----------------------------------------------------
+Resources:
+  # --------------------------------------------------
+  # VPC
+  # --------------------------------------------------
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-vpc
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: sampleECS
+          Value: "true"
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # --------------------------------------------------
+  # インターネットゲートウェイ
+  # --------------------------------------------------
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-igw
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: sampleECS
+          Value: "true"
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # --------------------------------------------------
+  # パブリックサブネット
+  # --------------------------------------------------
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !FindInMap [AZConfig, !Ref 'AWS::Region', AZ1]
+      CidrBlock: !Ref PublicSubnet1Cidr
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-public-subnet-1
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: sampleECS
+          Value: "true"
+        - Key: Tier
+          Value: Public
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Condition: IsMultiAZ
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !FindInMap [AZConfig, !Ref 'AWS::Region', AZ2]
+      CidrBlock: !Ref PublicSubnet2Cidr
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-public-subnet-2
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: sampleECS
+          Value: "true"
+        - Key: Tier
+          Value: Public
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # --------------------------------------------------
+  # プライベートサブネット（アプリケーション層）
+  # --------------------------------------------------
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !FindInMap [AZConfig, !Ref 'AWS::Region', AZ1]
+      CidrBlock: !Ref PrivateSubnet1Cidr
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-private-app-subnet-1
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: sampleECS
+          Value: "true"
+        - Key: Tier
+          Value: Private
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Condition: IsMultiAZ
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !FindInMap [AZConfig, !Ref 'AWS::Region', AZ2]
+      CidrBlock: !Ref PrivateSubnet2Cidr
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-private-app-subnet-2
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: sampleECS
+          Value: "true"
+        - Key: Tier
+          Value: Private
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # --------------------------------------------------
+  # プライベートサブネット（データ層）
+  # --------------------------------------------------
+  PrivateDataSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !FindInMap [AZConfig, !Ref 'AWS::Region', AZ1]
+      CidrBlock: !Ref PrivateDataSubnet1Cidr
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-private-data-subnet-1
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: sampleECS
+          Value: "true"
+        - Key: Tier
+          Value: Data
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  PrivateDataSubnet2:
+    Type: AWS::EC2::Subnet
+    Condition: IsMultiAZ
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !FindInMap [AZConfig, !Ref 'AWS::Region', AZ2]
+      CidrBlock: !Ref PrivateDataSubnet2Cidr
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-private-data-subnet-2
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: sampleECS
+          Value: "true"
+        - Key: Tier
+          Value: Data
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # --------------------------------------------------
+  # Elastic IP（NAT Gateway用）
+  # --------------------------------------------------
+  NatGateway1EIP:
+    Type: AWS::EC2::EIP
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-nat-eip-1
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: sampleECS
+          Value: "true"
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  NatGateway2EIP:
+    Type: AWS::EC2::EIP
+    Condition: IsMultiAZ
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-nat-eip-2
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: sampleECS
+          Value: "true"
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # --------------------------------------------------
+  # NAT Gateway
+  # --------------------------------------------------
+  NatGateway1:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGateway1EIP.AllocationId
+      SubnetId: !Ref PublicSubnet1
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-nat-1
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: sampleECS
+          Value: "true"
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  NatGateway2:
+    Type: AWS::EC2::NatGateway
+    Condition: IsMultiAZ
+    Properties:
+      AllocationId: !GetAtt NatGateway2EIP.AllocationId
+      SubnetId: !Ref PublicSubnet2
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-nat-2
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: sampleECS
+          Value: "true"
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # --------------------------------------------------
+  # ルートテーブル
+  # --------------------------------------------------
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-public-rtb
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: sampleECS
+          Value: "true"
+        - Key: Tier
+          Value: Public
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  PrivateRouteTable1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-private-app-rtb-1
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: sampleECS
+          Value: "true"
+        - Key: Tier
+          Value: Private
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  PrivateRouteTable2:
+    Type: AWS::EC2::RouteTable
+    Condition: IsMultiAZ
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-private-app-rtb-2
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: sampleECS
+          Value: "true"
+        - Key: Tier
+          Value: Private
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  PrivateDataRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-private-data-rtb
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: sampleECS
+          Value: "true"
+        - Key: Tier
+          Value: Data
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # --------------------------------------------------
+  # ルート
+  # --------------------------------------------------
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PrivateRoute1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway1
+
+  PrivateRoute2:
+    Type: AWS::EC2::Route
+    Condition: IsMultiAZ
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway2
+
+  # --------------------------------------------------
+  # サブネットとルートテーブルの関連付け
+  # --------------------------------------------------
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: IsMultiAZ
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
+  PrivateSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable1
+
+  PrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: IsMultiAZ
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable2
+
+  PrivateDataSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateDataSubnet1
+      RouteTableId: !Ref PrivateDataRouteTable
+
+  PrivateDataSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: IsMultiAZ
+    Properties:
+      SubnetId: !Ref PrivateDataSubnet2
+      RouteTableId: !Ref PrivateDataRouteTable
+
+  # --------------------------------------------------
+  # ネットワークACL
+  # --------------------------------------------------
+  PublicNACL:
+    Type: AWS::EC2::NetworkAcl
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-public-nacl
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: sampleECS
+          Value: "true"
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  PrivateAppNACL:
+    Type: AWS::EC2::NetworkAcl
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-private-app-nacl
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: sampleECS
+          Value: "true"
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  PrivateDataNACL:
+    Type: AWS::EC2::NetworkAcl
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-private-data-nacl
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: sampleECS
+          Value: "true"
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # --------------------------------------------------
+  # ネットワークACLルール（パブリック）
+  # --------------------------------------------------
+  PublicNACLIngressHTTP:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref PublicNACL
+      RuleNumber: 100
+      Protocol: 6
+      RuleAction: allow
+      Egress: false
+      CidrBlock: 0.0.0.0/0
+      PortRange:
+        From: 80
+        To: 80
+
+  PublicNACLIngressHTTPS:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref PublicNACL
+      RuleNumber: 110
+      Protocol: 6
+      RuleAction: allow
+      Egress: false
+      CidrBlock: 0.0.0.0/0
+      PortRange:
+        From: 443
+        To: 443
+
+  PublicNACLIngressEphemeral:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref PublicNACL
+      RuleNumber: 120
+      Protocol: 6
+      RuleAction: allow
+      Egress: false
+      CidrBlock: 0.0.0.0/0
+      PortRange:
+        From: 1024
+        To: 65535
+
+  PublicNACLEgressAll:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref PublicNACL
+      RuleNumber: 100
+      Protocol: -1
+      RuleAction: allow
+      Egress: true
+      CidrBlock: 0.0.0.0/0
+
+  # --------------------------------------------------
+  # ネットワークACLルール（プライベートApp）
+  # --------------------------------------------------
+  PrivateAppNACLIngressHTTP:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref PrivateAppNACL
+      RuleNumber: 100
+      Protocol: 6
+      RuleAction: allow
+      Egress: false
+      CidrBlock: !Ref VpcCidr
+      PortRange:
+        From: 80
+        To: 80
+
+  PrivateAppNACLIngressHTTPS:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref PrivateAppNACL
+      RuleNumber: 110
+      Protocol: 6
+      RuleAction: allow
+      Egress: false
+      CidrBlock: !Ref VpcCidr
+      PortRange:
+        From: 443
+        To: 443
+
+  PrivateAppNACLIngressCustom:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref PrivateAppNACL
+      RuleNumber: 120
+      Protocol: 6
+      RuleAction: allow
+      Egress: false
+      CidrBlock: !Ref VpcCidr
+      PortRange:
+        From: 8080
+        To: 8080
+
+  PrivateAppNACLIngressEphemeral:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref PrivateAppNACL
+      RuleNumber: 130
+      Protocol: 6
+      RuleAction: allow
+      Egress: false
+      CidrBlock: 0.0.0.0/0
+      PortRange:
+        From: 1024
+        To: 65535
+
+  PrivateAppNACLEgressAll:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref PrivateAppNACL
+      RuleNumber: 100
+      Protocol: -1
+      RuleAction: allow
+      Egress: true
+      CidrBlock: 0.0.0.0/0
+
+  # --------------------------------------------------
+  # ネットワークACLルール（プライベートData）
+  # --------------------------------------------------
+  PrivateDataNACLIngressPostgreSQL1:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref PrivateDataNACL
+      RuleNumber: 100
+      Protocol: 6
+      RuleAction: allow
+      Egress: false
+      CidrBlock: !Ref PrivateSubnet1Cidr
+      PortRange:
+        From: 5432
+        To: 5432
+
+  PrivateDataNACLIngressPostgreSQL2:
+    Type: AWS::EC2::NetworkAclEntry
+    Condition: IsMultiAZ
+    Properties:
+      NetworkAclId: !Ref PrivateDataNACL
+      RuleNumber: 110
+      Protocol: 6
+      RuleAction: allow
+      Egress: false
+      CidrBlock: !Ref PrivateSubnet2Cidr
+      PortRange:
+        From: 5432
+        To: 5432
+
+  PrivateDataNACLIngressEphemeral:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref PrivateDataNACL
+      RuleNumber: 120
+      Protocol: 6
+      RuleAction: allow
+      Egress: false
+      CidrBlock: !Ref VpcCidr
+      PortRange:
+        From: 1024
+        To: 65535
+
+  PrivateDataNACLEgressEphemeral:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref PrivateDataNACL
+      RuleNumber: 100
+      Protocol: 6
+      RuleAction: allow
+      Egress: true
+      CidrBlock: !Ref VpcCidr
+      PortRange:
+        From: 1024
+        To: 65535
+
+  # --------------------------------------------------
+  # サブネットとネットワークACLの関連付け
+  # --------------------------------------------------
+  PublicSubnet1NACLAssociation:
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      NetworkAclId: !Ref PublicNACL
+
+  PublicSubnet2NACLAssociation:
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+    Condition: IsMultiAZ
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      NetworkAclId: !Ref PublicNACL
+
+  PrivateSubnet1NACLAssociation:
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      NetworkAclId: !Ref PrivateAppNACL
+
+  PrivateSubnet2NACLAssociation:
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+    Condition: IsMultiAZ
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      NetworkAclId: !Ref PrivateAppNACL
+
+  PrivateDataSubnet1NACLAssociation:
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+    Properties:
+      SubnetId: !Ref PrivateDataSubnet1
+      NetworkAclId: !Ref PrivateDataNACL
+
+  PrivateDataSubnet2NACLAssociation:
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+    Condition: IsMultiAZ
+    Properties:
+      SubnetId: !Ref PrivateDataSubnet2
+      NetworkAclId: !Ref PrivateDataNACL
+
+  # --------------------------------------------------
+  # VPC Endpoints (Gateway型)
+  # --------------------------------------------------
+  S3Endpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action:
+              - 's3:GetObject'
+              - 's3:ListBucket'
+            Resource:
+              - 'arn:aws:s3:::*'
+      RouteTableIds:
+        - !Ref PrivateRouteTable1
+        - !If [IsMultiAZ, !Ref PrivateRouteTable2, !Ref 'AWS::NoValue']
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.s3'
+      VpcId: !Ref VPC
+      VpcEndpointType: Gateway
+
+  # --------------------------------------------------
+  # セキュリティグループ
+  # --------------------------------------------------
+  AlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ALB用セキュリティグループ
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP from anywhere
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS from anywhere
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-alb-sg
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: sampleECS
+          Value: "true"
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  EcsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ECS Fargateタスク用セキュリティグループ
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          SourceSecurityGroupId: !Ref AlbSecurityGroup
+          Description: HTTP from ALB
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-ecs-sg
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: sampleECS
+          Value: "true"
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  DBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: RDSインスタンス用セキュリティグループ
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref EcsSecurityGroup
+          Description: PostgreSQL from ECS
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-db-sg
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: sampleECS
+          Value: "true"
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # --------------------------------------------------
+  # VPCフローログ
+  # --------------------------------------------------
+  VPCFlowLogsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: vpc-flow-logs.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: sampleECS
+          Value: "true"
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  VPCFlowLog:
+    Type: AWS::EC2::FlowLog
+    Properties:
+      ResourceId: !Ref VPC
+      ResourceType: VPC
+      TrafficType: ALL
+      LogDestinationType: cloud-watch-logs
+      LogGroupName: !Sub /aws/vpc/flowlogs/${EnvironmentName}
+      DeliverLogsPermissionArn: !GetAtt VPCFlowLogsRole.Arn
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-vpc-flowlog
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: sampleECS
+          Value: "true"
+        - Key: ManagedBy
+          Value: CloudFormation
+
+# -----------------------------------------------------
+# 出力値
+# -----------------------------------------------------
+Outputs:
+  VpcId:
+    Description: VPC ID
+    Value: !Ref VPC
+    Export:
+      Name: !Sub ${EnvironmentName}-VpcId
+
+  PublicSubnet1Id:
+    Description: パブリックサブネット1 ID
+    Value: !Ref PublicSubnet1
+    Export:
+      Name: !Sub ${EnvironmentName}-PublicSubnet1Id
+
+  PublicSubnet2Id:
+    Description: パブリックサブネット2 ID
+    Value: !If
+      - IsMultiAZ
+      - !Ref PublicSubnet2
+      - !Ref PublicSubnet1
+    Export:
+      Name: !Sub ${EnvironmentName}-PublicSubnet2Id
+
+  PrivateSubnet1Id:
+    Description: プライベートサブネット1 ID
+    Value: !Ref PrivateSubnet1
+    Export:
+      Name: !Sub ${EnvironmentName}-PrivateSubnet1Id
+
+  PrivateSubnet2Id:
+    Description: プライベートサブネット2 ID
+    Value: !If
+      - IsMultiAZ
+      - !Ref PrivateSubnet2
+      - !Ref PrivateSubnet1
+    Export:
+      Name: !Sub ${EnvironmentName}-PrivateSubnet2Id
+
+  PrivateDataSubnet1Id:
+    Description: プライベートデータサブネット1 ID
+    Value: !Ref PrivateDataSubnet1
+    Export:
+      Name: !Sub ${EnvironmentName}-PrivateDataSubnet1Id
+
+  PrivateDataSubnet2Id:
+    Description: プライベートデータサブネット2 ID
+    Value: !If
+      - IsMultiAZ
+      - !Ref PrivateDataSubnet2
+      - !Ref PrivateDataSubnet1
+    Export:
+      Name: !Sub ${EnvironmentName}-PrivateDataSubnet2Id
+
+  AlbSecurityGroupId:
+    Description: ALBセキュリティグループID
+    Value: !Ref AlbSecurityGroup
+    Export:
+      Name: !Sub ${EnvironmentName}-AlbSecurityGroupId
+
+  EcsSecurityGroupId:
+    Description: ECSセキュリティグループID
+    Value: !Ref EcsSecurityGroup
+    Export:
+      Name: !Sub ${EnvironmentName}-EcsSecurityGroupId
+
+  DBSecurityGroupId:
+    Description: DBセキュリティグループID
+    Value: !Ref DBSecurityGroup
+    Export:
+      Name: !Sub ${EnvironmentName}-DBSecurityGroupId
+
+  AvailabilityZone1:
+    Description: 使用するアベイラビリティゾーン1
+    Value: !FindInMap [AZConfig, !Ref 'AWS::Region', AZ1]
+    Export:
+      Name: !Sub ${EnvironmentName}-AZ1
+
+  AvailabilityZone2:
+    Description: 使用するアベイラビリティゾーン2
+    Value: !FindInMap [AZConfig, !Ref 'AWS::Region', AZ2]
+    Export:
+      Name: !Sub ${EnvironmentName}-AZ2

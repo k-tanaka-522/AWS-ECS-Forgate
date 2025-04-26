@@ -1,0 +1,457 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'ECSForgate プロジェクト データベーススタック - 環境: {{環境名}}'
+
+# -----------------------------------------------------
+# パラメータ定義
+# -----------------------------------------------------
+Parameters:
+  EnvironmentName:
+    Type: String
+    Description: 環境名（dev/stg/prd）
+
+  # ネットワーク関連パラメータ
+  VpcId:
+    Type: String
+    Description: VPC ID
+
+  PrivateSubnet1Id:
+    Type: String
+    Description: プライベートサブネット1 ID
+
+  PrivateSubnet2Id:
+    Type: String
+    Description: プライベートサブネット2 ID
+
+  DBSecurityGroupId:
+    Type: String
+    Description: DBセキュリティグループID
+
+  # データベース関連パラメータ
+  DbInstanceClass:
+    Type: String
+    Default: db.t3.small
+    AllowedValues:
+      - db.t3.small
+      - db.t3.medium
+      - db.t3.large
+    Description: DBインスタンスクラス
+
+  DbAllocatedStorage:
+    Type: Number
+    Default: 20
+    MinValue: 20
+    MaxValue: 100
+    Description: ストレージサイズ(GB)
+
+  DbMultiAZ:
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: マルチAZデプロイの有効化
+
+  BackupRetentionPeriod:
+    Type: Number
+    Default: 7
+    MinValue: 1
+    MaxValue: 35
+    Description: 自動バックアップの保持期間（日）
+
+  MonitoringInterval:
+    Type: Number
+    Default: 0
+    AllowedValues:
+      - 0
+      - 1
+      - 5
+      - 10
+      - 15
+      - 30
+      - 60
+    Description: 拡張モニタリングの間隔（秒）（0は無効）
+
+  DbName:
+    Type: String
+    Default: ecsforgate
+    Description: データベース名
+    MinLength: 1
+    MaxLength: 64
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9_]*'
+
+  DbUsername:
+    Type: String
+    Default: ecsadmin
+    Description: データベースのマスターユーザー名
+    MinLength: 1
+    MaxLength: 16
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9_]*'
+    ConstraintDescription: 先頭は英字、英数字とアンダースコアのみ使用可能、1〜16文字
+
+  DbPort:
+    Type: Number
+    Default: 5432
+    Description: データベースのポート番号
+    MinValue: 1150
+    MaxValue: 65535
+
+# -----------------------------------------------------
+# マッピング
+# -----------------------------------------------------
+Mappings:
+  EnvironmentConfig:
+    dev:
+      StorageType: gp2
+      StorageEncrypted: true
+      AutoMinorVersionUpgrade: true
+      DeletionProtection: false
+      MaxAllocatedStorage: 0
+      PerformanceInsights: false
+      CopyTagsToSnapshot: true
+      LogExports: 
+        - postgresql
+      SkipFinalSnapshot: true
+    stg:
+      StorageType: gp2
+      StorageEncrypted: true
+      AutoMinorVersionUpgrade: true
+      DeletionProtection: true
+      MaxAllocatedStorage: 100
+      PerformanceInsights: true
+      CopyTagsToSnapshot: true
+      LogExports: 
+        - postgresql
+        - upgrade
+      SkipFinalSnapshot: true
+    prd:
+      StorageType: gp3
+      StorageEncrypted: true
+      AutoMinorVersionUpgrade: true
+      DeletionProtection: true
+      MaxAllocatedStorage: 200
+      PerformanceInsights: true
+      CopyTagsToSnapshot: true
+      LogExports: 
+        - postgresql
+        - upgrade
+      SkipFinalSnapshot: false
+
+# -----------------------------------------------------
+# リソース定義
+# -----------------------------------------------------
+Resources:
+  # --------------------------------------------------
+  # DBサブネットグループ
+  # --------------------------------------------------
+  DbSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: !Sub ${EnvironmentName} RDS DB Subnet Group
+      SubnetIds:
+        - !Ref PrivateSubnet1Id
+        - !Ref PrivateSubnet2Id
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-db-subnet-group
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: sampleECS
+          Value: "true"
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # --------------------------------------------------
+  # DBパラメータグループ
+  # --------------------------------------------------
+  DbParameterGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Description: !Sub ${EnvironmentName} PostgreSQL Parameter Group
+      Family: postgres13
+      Parameters:
+        log_connections: 'true'
+        log_disconnections: 'true'
+        log_statement: !If [IsProd, 'mod', 'all']
+        idle_in_transaction_session_timeout: '3600000'
+        statement_timeout: !If [IsDev, '60000', !If [IsStg, '300000', '600000']]
+        max_connections: !If [IsDev, '100', !If [IsStg, '200', '300']]
+        shared_buffers: !If [IsDev, '{DBInstanceClassMemory/32}', !If [IsStg, '{DBInstanceClassMemory/8}', '{DBInstanceClassMemory/4}']]
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-db-parameter-group
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: sampleECS
+          Value: "true"
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # --------------------------------------------------
+  # データベース認証情報（Secrets Manager）
+  # --------------------------------------------------
+  DbSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub ${EnvironmentName}/db/ecsforgate
+      Description: !Sub ${EnvironmentName} PostgreSQL database credentials
+      GenerateSecretString:
+        SecretStringTemplate: !Sub '{"username": "${DbUsername}"}'
+        GenerateStringKey: password
+        PasswordLength: 16
+        ExcludeCharacters: "\"'`/\\@"
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: sampleECS
+          Value: "true"
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # --------------------------------------------------
+  # モニタリングロール（拡張モニタリング用）
+  # --------------------------------------------------
+  MonitoringRole:
+    Type: AWS::IAM::Role
+    Condition: EnableEnhancedMonitoring
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: monitoring.rds.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: sampleECS
+          Value: "true"
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # --------------------------------------------------
+  # RDSインスタンス
+  # --------------------------------------------------
+  DbInstance:
+    Type: AWS::RDS::DBInstance
+    DependsOn: DbSecret
+    Properties:
+      Engine: postgres
+      EngineVersion: 13.10
+      DBInstanceIdentifier: !Sub ${EnvironmentName}-ecsforgate-db
+      DBName: !Ref DbName
+      MasterUsername: !Ref DbUsername
+      MasterUserPassword: !Join ['', ['{{resolve:secretsmanager:', !Ref DbSecret, ':SecretString:password}}' ]]
+      DBInstanceClass: !Ref DbInstanceClass
+      AllocatedStorage: !Ref DbAllocatedStorage
+      MaxAllocatedStorage: !FindInMap [EnvironmentConfig, !Ref EnvironmentName, MaxAllocatedStorage]
+      StorageType: !FindInMap [EnvironmentConfig, !Ref EnvironmentName, StorageType]
+      StorageEncrypted: !FindInMap [EnvironmentConfig, !Ref EnvironmentName, StorageEncrypted]
+      Port: !Ref DbPort
+      MultiAZ: !Ref DbMultiAZ
+      AutoMinorVersionUpgrade: !FindInMap [EnvironmentConfig, !Ref EnvironmentName, AutoMinorVersionUpgrade]
+      BackupRetentionPeriod: !Ref BackupRetentionPeriod
+      PreferredBackupWindow: '01:00-02:00'
+      PreferredMaintenanceWindow: 'sun:03:00-sun:04:00'
+      DBSubnetGroupName: !Ref DbSubnetGroup
+      VPCSecurityGroups:
+        - !Ref DBSecurityGroupId
+      DBParameterGroupName: !Ref DbParameterGroup
+      PubliclyAccessible: false
+      DeletionProtection: !FindInMap [EnvironmentConfig, !Ref EnvironmentName, DeletionProtection]
+      CopyTagsToSnapshot: !FindInMap [EnvironmentConfig, !Ref EnvironmentName, CopyTagsToSnapshot]
+      EnablePerformanceInsights: !FindInMap [EnvironmentConfig, !Ref EnvironmentName, PerformanceInsights]
+      MonitoringInterval: !If [EnableEnhancedMonitoring, !Ref MonitoringInterval, 0]
+      MonitoringRoleArn: !If [EnableEnhancedMonitoring, !GetAtt MonitoringRole.Arn, !Ref 'AWS::NoValue']
+      EnableIAMDatabaseAuthentication: true
+      EnableCloudwatchLogsExports: !FindInMap [EnvironmentConfig, !Ref EnvironmentName, LogExports]
+      SkipFinalSnapshot: !FindInMap [EnvironmentConfig, !Ref EnvironmentName, SkipFinalSnapshot]
+      FinalDBSnapshotIdentifier: !If [IsProd, !Sub "${EnvironmentName}-ecsforgate-final-snapshot-${AWS::StackName}", !Ref 'AWS::NoValue']
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-ecsforgate-db
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: sampleECS
+          Value: "true"
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # --------------------------------------------------
+  # アプリケーション接続用のSecretsManager
+  # --------------------------------------------------
+  AppDbConnectionSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub ${EnvironmentName}/app/db-connection
+      Description: !Sub ${EnvironmentName} PostgreSQL database connection for application
+      SecretString: !Sub '{"jdbcUrl": "jdbc:postgresql://${DbInstance.Endpoint.Address}:${DbInstance.Endpoint.Port}/${DbName}", "username": "${DbUsername}", "password": "{{resolve:secretsmanager:${DbSecret}:SecretString:password}}", "engine": "postgres", "host": "${DbInstance.Endpoint.Address}", "port": "${DbInstance.Endpoint.Port}", "dbname": "${DbName}"}'
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: sampleECS
+          Value: "true"
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # --------------------------------------------------
+  # CloudWatch アラーム
+  # --------------------------------------------------
+  CpuUtilizationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-db-cpu-utilization-alarm
+      AlarmDescription: !Sub ${EnvironmentName} Database CPU utilization is too high
+      Namespace: AWS/RDS
+      MetricName: CPUUtilization
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref DbInstance
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 70
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
+      OKActions:
+        - !Ref AlarmTopic
+
+  FreeableMemoryAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-db-freeable-memory-alarm
+      AlarmDescription: !Sub ${EnvironmentName} Database freeable memory is too low
+      Namespace: AWS/RDS
+      MetricName: FreeableMemory
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref DbInstance
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: !If [IsProd, 1073741824, 536870912]  # 1GB for prod, 512MB for others
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
+      OKActions:
+        - !Ref AlarmTopic
+
+  FreeStorageSpaceAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-db-free-storage-space-alarm
+      AlarmDescription: !Sub ${EnvironmentName} Database free storage space is too low
+      Namespace: AWS/RDS
+      MetricName: FreeStorageSpace
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref DbInstance
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: !If [IsProd, !Mul [!Ref DbAllocatedStorage, 0.25], !Mul [!Ref DbAllocatedStorage, 0.2]]  # 25% for prod, 20% for others
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
+      OKActions:
+        - !Ref AlarmTopic
+
+  DatabaseConnectionsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-db-connections-alarm
+      AlarmDescription: !Sub ${EnvironmentName} Database connections are too high
+      Namespace: AWS/RDS
+      MetricName: DatabaseConnections
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref DbInstance
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: !If [IsDev, 80, !If [IsStg, 160, 240]]  # 80% of max connections
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
+      OKActions:
+        - !Ref AlarmTopic
+
+  # --------------------------------------------------
+  # SNSトピック（アラーム通知用）
+  # --------------------------------------------------
+  AlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: !Sub ${EnvironmentName}-db-alarms
+      TopicName: !Sub ${EnvironmentName}-db-alarms
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: sampleECS
+          Value: "true"
+        - Key: ManagedBy
+          Value: CloudFormation
+
+# -----------------------------------------------------
+# 条件
+# -----------------------------------------------------
+Conditions:
+  IsDev: !Equals [!Ref EnvironmentName, 'dev']
+  IsStg: !Equals [!Ref EnvironmentName, 'stg']
+  IsProd: !Equals [!Ref EnvironmentName, 'prd']
+  EnableEnhancedMonitoring: !Not [!Equals [!Ref MonitoringInterval, 0]]
+
+# -----------------------------------------------------
+# 出力値
+# -----------------------------------------------------
+Outputs:
+  DbInstanceId:
+    Description: データベースインスタンスID
+    Value: !Ref DbInstance
+    Export:
+      Name: !Sub ${EnvironmentName}-DbInstanceId
+
+  DbEndpoint:
+    Description: データベースエンドポイント
+    Value: !GetAtt DbInstance.Endpoint.Address
+    Export:
+      Name: !Sub ${EnvironmentName}-DbEndpoint
+
+  DbPort:
+    Description: データベースポート
+    Value: !GetAtt DbInstance.Endpoint.Port
+    Export:
+      Name: !Sub ${EnvironmentName}-DbPort
+
+  DbName:
+    Description: データベース名
+    Value: !Ref DbName
+    Export:
+      Name: !Sub ${EnvironmentName}-DbName
+
+  DbConnectionSecretArn:
+    Description: データベース接続情報のSecret ARN
+    Value: !Ref AppDbConnectionSecret
+    Export:
+      Name: !Sub ${EnvironmentName}-DbConnectionSecretArn

@@ -1,0 +1,376 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'ECSForgate プロジェクト ALBスタック - 環境: {{環境名}}'
+
+# -----------------------------------------------------
+# パラメータ定義
+# -----------------------------------------------------
+Parameters:
+  EnvironmentName:
+    Type: String
+    Description: 環境名（dev/stg/prd）
+
+  # ネットワーク関連パラメータ
+  VpcId:
+    Type: String
+    Description: VPC ID
+
+  PublicSubnet1Id:
+    Type: String
+    Description: パブリックサブネット1 ID
+
+  PublicSubnet2Id:
+    Type: String
+    Description: パブリックサブネット2 ID
+
+  AlbSecurityGroupId:
+    Type: String
+    Description: ALBセキュリティグループID
+
+  UseDualAZ:
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: デュアルAZデプロイの有効化
+
+# -----------------------------------------------------
+# マッピング
+# -----------------------------------------------------
+Mappings:
+  EnvironmentConfig:
+    dev:
+      DeletionProtection: false
+      IdleTimeout: 60
+      SlowStartDuration: 0
+      S3LogRetention: 14
+      AlarmThreshold5XX: 10
+      AlarmThresholdResponseTime: 1.0
+    stg:
+      DeletionProtection: true
+      IdleTimeout: 60
+      SlowStartDuration: 30
+      S3LogRetention: 30
+      AlarmThreshold5XX: 10
+      AlarmThresholdResponseTime: 1.0
+    prd:
+      DeletionProtection: true
+      IdleTimeout: 60
+      SlowStartDuration: 30
+      S3LogRetention: 90
+      AlarmThreshold5XX: 5
+      AlarmThresholdResponseTime: 0.5
+
+# -----------------------------------------------------
+# 条件
+# -----------------------------------------------------
+Conditions:
+  IsDev: !Equals [!Ref EnvironmentName, 'dev']
+  IsStg: !Equals [!Ref EnvironmentName, 'stg']
+  IsProd: !Equals [!Ref EnvironmentName, 'prd']
+  IsMultiAZ: !Equals [!Ref UseDualAZ, 'true']
+
+# -----------------------------------------------------
+# リソース定義
+# -----------------------------------------------------
+Resources:
+  # --------------------------------------------------
+  # アクセスログ用S3バケット
+  # --------------------------------------------------
+  AlbLogBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ecsforgate-${EnvironmentName}-alb-logs-${AWS::AccountId}
+      AccessControl: Private
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireLogsRule
+            Status: Enabled
+            ExpirationInDays: !FindInMap [EnvironmentConfig, !Ref EnvironmentName, S3LogRetention]
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-alb-logs-bucket
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: sampleECS
+          Value: "true"
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # --------------------------------------------------
+  # アクセスログバケットポリシー
+  # --------------------------------------------------
+  AlbLogBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref AlbLogBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Action:
+              - s3:PutObject
+            Effect: Allow
+            Resource: !Sub arn:aws:s3:::${AlbLogBucket}/AWSLogs/${AWS::AccountId}/*
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::Region}:root
+
+  # --------------------------------------------------
+  # アプリケーションロードバランサー
+  # --------------------------------------------------
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub ${EnvironmentName}-ecsforgate-alb
+      Scheme: internal
+      Type: application
+      Subnets: !If 
+        - IsMultiAZ
+        - - !Ref PublicSubnet1Id
+          - !Ref PublicSubnet2Id
+        - - !Ref PublicSubnet1Id
+      SecurityGroups:
+        - !Ref AlbSecurityGroupId
+      IpAddressType: ipv4
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value: !FindInMap [EnvironmentConfig, !Ref EnvironmentName, IdleTimeout]
+        - Key: deletion_protection.enabled
+          Value: !FindInMap [EnvironmentConfig, !Ref EnvironmentName, DeletionProtection]
+        - Key: access_logs.s3.enabled
+          Value: true
+        - Key: access_logs.s3.bucket
+          Value: !Ref AlbLogBucket
+        - Key: access_logs.s3.prefix
+          Value: !Sub AWSLogs/${AWS::AccountId}/elasticloadbalancing/${AWS::Region}
+        - Key: routing.http2.enabled
+          Value: true
+        - Key: load_balancing.cross_zone.enabled
+          Value: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-ecsforgate-alb
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: sampleECS
+          Value: "true"
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # --------------------------------------------------
+  # ターゲットグループ
+  # --------------------------------------------------
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${EnvironmentName}-ecsforgate-tg
+      VpcId: !Ref VpcId
+      Port: 8080
+      Protocol: HTTP
+      TargetType: ip
+      HealthCheckEnabled: true
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPath: /api/health
+      HealthCheckPort: traffic-port
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 3
+      UnhealthyThresholdCount: 2
+      Matcher:
+        HttpCode: 200-299
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: 300
+        - Key: load_balancing.algorithm.type
+          Value: round_robin
+        - Key: slow_start.duration_seconds
+          Value: !FindInMap [EnvironmentConfig, !Ref EnvironmentName, SlowStartDuration]
+        - Key: stickiness.enabled
+          Value: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-ecsforgate-tg
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: sampleECS
+          Value: "true"
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # --------------------------------------------------
+  # HTTPリスナー
+  # --------------------------------------------------
+  HttpListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+
+  # --------------------------------------------------
+  # リスナールール
+  # --------------------------------------------------
+  HealthCheckRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref HttpListener
+      Priority: 10
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - /api/health
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+
+  ApiRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref HttpListener
+      Priority: 20
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - /api/*
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+
+  # --------------------------------------------------
+  # CloudWatch アラーム
+  # --------------------------------------------------
+  HttpCode5XXAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-alb-5xx-errors-alarm
+      AlarmDescription: !Sub ${EnvironmentName} ALB 5XX errors are too high
+      Namespace: AWS/ApplicationELB
+      MetricName: HTTPCode_ELB_5XX_Count
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !GetAtt ApplicationLoadBalancer.LoadBalancerFullName
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: !FindInMap [EnvironmentConfig, !Ref EnvironmentName, AlarmThreshold5XX]
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
+      OKActions:
+        - !Ref AlarmTopic
+
+  TargetResponseTimeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-alb-response-time-alarm
+      AlarmDescription: !Sub ${EnvironmentName} ALB target response time is too high
+      Namespace: AWS/ApplicationELB
+      MetricName: TargetResponseTime
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !GetAtt ApplicationLoadBalancer.LoadBalancerFullName
+      ExtendedStatistic: p95
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: !FindInMap [EnvironmentConfig, !Ref EnvironmentName, AlarmThresholdResponseTime]
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
+      OKActions:
+        - !Ref AlarmTopic
+
+  UnhealthyHostCountAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-alb-unhealthy-hosts-alarm
+      AlarmDescription: !Sub ${EnvironmentName} ALB unhealthy hosts detected
+      Namespace: AWS/ApplicationELB
+      MetricName: UnHealthyHostCount
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !GetAtt ApplicationLoadBalancer.LoadBalancerFullName
+        - Name: TargetGroup
+          Value: !GetAtt TargetGroup.TargetGroupFullName
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
+      OKActions:
+        - !Ref AlarmTopic
+
+  # --------------------------------------------------
+  # SNSトピック（アラーム通知用）
+  # --------------------------------------------------
+  AlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: !Sub ${EnvironmentName}-alb-alarms
+      TopicName: !Sub ${EnvironmentName}-alb-alarms
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: sampleECS
+          Value: "true"
+        - Key: ManagedBy
+          Value: CloudFormation
+
+# -----------------------------------------------------
+# 出力値
+# -----------------------------------------------------
+Outputs:
+  LoadBalancerArn:
+    Description: ALB ARN
+    Value: !Ref ApplicationLoadBalancer
+    Export:
+      Name: !Sub ${EnvironmentName}-LoadBalancerArn
+
+  LoadBalancerDnsName:
+    Description: ALB DNS名
+    Value: !GetAtt ApplicationLoadBalancer.DNSName
+    Export:
+      Name: !Sub ${EnvironmentName}-LoadBalancerDnsName
+
+  LoadBalancerFullName:
+    Description: ALB フルネーム
+    Value: !GetAtt ApplicationLoadBalancer.LoadBalancerFullName
+    Export:
+      Name: !Sub ${EnvironmentName}-LoadBalancerFullName
+
+  TargetGroupArn:
+    Description: ターゲットグループARN
+    Value: !Ref TargetGroup
+    Export:
+      Name: !Sub ${EnvironmentName}-TargetGroupArn
+
+  TargetGroupFullName:
+    Description: ターゲットグループフルネーム
+    Value: !GetAtt TargetGroup.TargetGroupFullName
+    Export:
+      Name: !Sub ${EnvironmentName}-TargetGroupFullName
+
+  HttpListenerArn:
+    Description: HTTPリスナーARN
+    Value: !Ref HttpListener
+    Export:
+      Name: !Sub ${EnvironmentName}-HttpListenerArn

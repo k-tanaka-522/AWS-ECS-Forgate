@@ -1,0 +1,566 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'ECSForgate プロジェクト 監視スタック - 環境: {{環境名}}'
+
+# -----------------------------------------------------
+# パラメータ定義
+# -----------------------------------------------------
+Parameters:
+  EnvironmentName:
+    Type: String
+    Description: 環境名（dev/stg/prd）
+
+  # リソース関連パラメータ
+  EcsClusterName:
+    Type: String
+    Description: ECSクラスター名
+
+  EcsServiceName:
+    Type: String
+    Description: ECSサービス名
+
+  LoadBalancerArn:
+    Type: String
+    Description: ALB ARN
+
+  TargetGroupArn:
+    Type: String
+    Description: ターゲットグループARN
+
+  DbInstanceId:
+    Type: String
+    Description: データベースインスタンスID
+
+  # 監視・ログ関連パラメータ
+  LogRetention:
+    Type: Number
+    Description: ログ保持期間（日数）
+
+  AlertEmail:
+    Type: String
+    Default: admin@example.com
+    Description: アラート通知先メールアドレス
+
+# -----------------------------------------------------
+# マッピング
+# -----------------------------------------------------
+Mappings:
+  EnvironmentConfig:
+    dev:
+      AlarmPrefix: DEV
+      XRaySamplingRate: 1.0
+      XRayReservoirSize: 10
+      CpuUtilizationThreshold: 80
+      MemoryUtilizationThreshold: 80
+      TargetResponseTimeThreshold: 1.0
+      ErrorCountThreshold: 5
+      EnableSmsAlerts: false
+    stg:
+      AlarmPrefix: STG
+      XRaySamplingRate: 0.5
+      XRayReservoirSize: 20
+      CpuUtilizationThreshold: 80
+      MemoryUtilizationThreshold: 80
+      TargetResponseTimeThreshold: 1.0
+      ErrorCountThreshold: 5
+      EnableSmsAlerts: false
+    prd:
+      AlarmPrefix: PRD
+      XRaySamplingRate: 0.1
+      XRayReservoirSize: 50
+      CpuUtilizationThreshold: 70
+      MemoryUtilizationThreshold: 70
+      TargetResponseTimeThreshold: 0.5
+      ErrorCountThreshold: 3
+      EnableSmsAlerts: true
+
+# -----------------------------------------------------
+# 条件
+# -----------------------------------------------------
+Conditions:
+  IsDev: !Equals [!Ref EnvironmentName, 'dev']
+  IsStg: !Equals [!Ref EnvironmentName, 'stg']
+  IsProd: !Equals [!Ref EnvironmentName, 'prd']
+  EnableSms: !Equals [!FindInMap [EnvironmentConfig, !Ref EnvironmentName, EnableSmsAlerts], true]
+
+# -----------------------------------------------------
+# リソース定義
+# -----------------------------------------------------
+Resources:
+  # --------------------------------------------------
+  # CloudWatch ダッシュボード
+  # --------------------------------------------------
+  MainDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub ${EnvironmentName}-ecsforgate-dashboard
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "text",
+              "x": 0,
+              "y": 0,
+              "width": 24,
+              "height": 1,
+              "properties": {
+                "markdown": "# ECSForgate ${EnvironmentName} 監視ダッシュボード"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 1,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/ECS", "CPUUtilization", "ServiceName", "${EcsServiceName}", "ClusterName", "${EcsClusterName}" ]
+                ],
+                "period": 60,
+                "stat": "Average",
+                "region": "${AWS::Region}",
+                "title": "ECS CPU 使用率"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 1,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/ECS", "MemoryUtilization", "ServiceName", "${EcsServiceName}", "ClusterName", "${EcsClusterName}" ]
+                ],
+                "period": 60,
+                "stat": "Average",
+                "region": "${AWS::Region}",
+                "title": "ECS メモリ使用率"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 7,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/ApplicationELB", "TargetResponseTime", "LoadBalancer", "${LoadBalancerArn}" ]
+                ],
+                "period": 60,
+                "stat": "p95",
+                "region": "${AWS::Region}",
+                "title": "ALB レスポンスタイム (p95)"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 7,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/ApplicationELB", "RequestCount", "LoadBalancer", "${LoadBalancerArn}" ]
+                ],
+                "period": 60,
+                "stat": "Sum",
+                "region": "${AWS::Region}",
+                "title": "ALB リクエスト数"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 13,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/ApplicationELB", "HTTPCode_Target_2XX_Count", "LoadBalancer", "${LoadBalancerArn}" ],
+                  [ "AWS/ApplicationELB", "HTTPCode_Target_4XX_Count", "LoadBalancer", "${LoadBalancerArn}" ],
+                  [ "AWS/ApplicationELB", "HTTPCode_Target_5XX_Count", "LoadBalancer", "${LoadBalancerArn}" ]
+                ],
+                "period": 60,
+                "stat": "Sum",
+                "region": "${AWS::Region}",
+                "title": "ALB レスポンスコード"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 13,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/RDS", "CPUUtilization", "DBInstanceIdentifier", "${DbInstanceId}" ]
+                ],
+                "period": 60,
+                "stat": "Average",
+                "region": "${AWS::Region}",
+                "title": "RDS CPU 使用率"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 19,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/RDS", "FreeableMemory", "DBInstanceIdentifier", "${DbInstanceId}" ]
+                ],
+                "period": 60,
+                "stat": "Average",
+                "region": "${AWS::Region}",
+                "title": "RDS 空きメモリ"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 19,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/RDS", "FreeStorageSpace", "DBInstanceIdentifier", "${DbInstanceId}" ]
+                ],
+                "period": 60,
+                "stat": "Average",
+                "region": "${AWS::Region}",
+                "title": "RDS 空きストレージ"
+              }
+            }
+          ]
+        }
+
+  # --------------------------------------------------
+  # SNSトピック（アラーム通知用）
+  # --------------------------------------------------
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: !Sub ${EnvironmentName}-ecsforgate-alerts
+      TopicName: !Sub ${EnvironmentName}-ecsforgate-alerts
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ECSForgate
+        - Key: sampleECS
+          Value: "true"
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # --------------------------------------------------
+  # SNSトピックサブスクリプション
+  # --------------------------------------------------
+  EmailSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Protocol: email
+      TopicArn: !Ref AlertTopic
+      Endpoint: !Ref AlertEmail
+
+  SmsSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: EnableSms
+    Properties:
+      Protocol: sms
+      TopicArn: !Ref AlertTopic
+      Endpoint: !GetAtt AlertSnsPolicy.PhoneNumber
+
+  # --------------------------------------------------
+  # アラートポリシー（SMS）
+  # --------------------------------------------------
+  AlertSnsPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Condition: EnableSms
+    Properties:
+      Description: Policy for SMS alerts
+      ManagedPolicyName: !Sub ${EnvironmentName}-ecsforgate-sns-policy
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: sns:Publish
+            Resource: !Ref AlertTopic
+      Path: /
+      PhoneNumber: "+818000000000" # 実際の電話番号に置き換える必要があります
+
+  # --------------------------------------------------
+  # X-Ray設定
+  # --------------------------------------------------
+  XRaySamplingRule:
+    Type: AWS::XRay::SamplingRule
+    Properties:
+      SamplingRule:
+        RuleName: !Sub ${EnvironmentName}-ecsforgate-api-sampling
+        Priority: 100
+        ReservoirSize: !FindInMap [EnvironmentConfig, !Ref EnvironmentName, XRayReservoirSize]
+        FixedRate: !FindInMap [EnvironmentConfig, !Ref EnvironmentName, XRaySamplingRate]
+        ServiceName: "*"
+        ServiceType: "*"
+        Host: "*"
+        HTTPMethod: "*"
+        URLPath: "/api/*"
+        Version: 1
+
+  XRayHealthCheckSamplingRule:
+    Type: AWS::XRay::SamplingRule
+    Properties:
+      SamplingRule:
+        RuleName: !Sub ${EnvironmentName}-ecsforgate-health-sampling
+        Priority: 10
+        ReservoirSize: 0
+        FixedRate: 0
+        ServiceName: "*"
+        ServiceType: "*"
+        Host: "*"
+        HTTPMethod: "*"
+        URLPath: "/api/health"
+        Version: 1
+
+  XRayErrorSamplingRule:
+    Type: AWS::XRay::SamplingRule
+    Properties:
+      SamplingRule:
+        RuleName: !Sub ${EnvironmentName}-ecsforgate-error-sampling
+        Priority: 20
+        ReservoirSize: 10
+        FixedRate: 0.5
+        ServiceName: "*"
+        ServiceType: "*"
+        Host: "*"
+        HTTPMethod: "*"
+        URLPath: "*"
+        Attributes:
+          http_status: "4*,5*" 
+        Version: 1
+
+  # --------------------------------------------------
+  # CloudWatch アラーム（ECS）
+  # --------------------------------------------------
+  EcsCpuUtilizationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-EcsCpuUtilizationAlarm
+      AlarmDescription: !Sub ${FindInMap [EnvironmentConfig, !Ref EnvironmentName, AlarmPrefix]} ECS CPU使用率が高すぎます
+      MetricName: CPUUtilization
+      Namespace: AWS/ECS
+      Dimensions:
+        - Name: ClusterName
+          Value: !Ref EcsClusterName
+        - Name: ServiceName
+          Value: !Ref EcsServiceName
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: !FindInMap [EnvironmentConfig, !Ref EnvironmentName, CpuUtilizationThreshold]
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertTopic
+      OKActions:
+        - !Ref AlertTopic
+
+  EcsMemoryUtilizationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-EcsMemoryUtilizationAlarm
+      AlarmDescription: !Sub ${FindInMap [EnvironmentConfig, !Ref EnvironmentName, AlarmPrefix]} ECS メモリ使用率が高すぎます
+      MetricName: MemoryUtilization
+      Namespace: AWS/ECS
+      Dimensions:
+        - Name: ClusterName
+          Value: !Ref EcsClusterName
+        - Name: ServiceName
+          Value: !Ref EcsServiceName
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: !FindInMap [EnvironmentConfig, !Ref EnvironmentName, MemoryUtilizationThreshold]
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertTopic
+      OKActions:
+        - !Ref AlertTopic
+
+  # --------------------------------------------------
+  # CloudWatch アラーム（ALB）
+  # --------------------------------------------------
+  TargetResponseTimeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-TargetResponseTimeAlarm
+      AlarmDescription: !Sub ${FindInMap [EnvironmentConfig, !Ref EnvironmentName, AlarmPrefix]} ALB ターゲットレスポンスタイムが高すぎます
+      MetricName: TargetResponseTime
+      Namespace: AWS/ApplicationELB
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !Ref LoadBalancerArn
+      ExtendedStatistic: p95
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: !FindInMap [EnvironmentConfig, !Ref EnvironmentName, TargetResponseTimeThreshold]
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertTopic
+      OKActions:
+        - !Ref AlertTopic
+
+  HttpCode5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-HttpCode5xxAlarm
+      AlarmDescription: !Sub ${FindInMap [EnvironmentConfig, !Ref EnvironmentName, AlarmPrefix]} 5XXエラーが多すぎます
+      MetricName: HTTPCode_Target_5XX_Count
+      Namespace: AWS/ApplicationELB
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !Ref LoadBalancerArn
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: !FindInMap [EnvironmentConfig, !Ref EnvironmentName, ErrorCountThreshold]
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertTopic
+      OKActions:
+        - !Ref AlertTopic
+
+  # --------------------------------------------------
+  # CloudWatch アラーム（RDS）
+  # --------------------------------------------------
+  RdsCpuUtilizationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-RdsCpuUtilizationAlarm
+      AlarmDescription: !Sub ${FindInMap [EnvironmentConfig, !Ref EnvironmentName, AlarmPrefix]} RDS CPU使用率が高すぎます
+      MetricName: CPUUtilization
+      Namespace: AWS/RDS
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref DbInstanceId
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: !FindInMap [EnvironmentConfig, !Ref EnvironmentName, CpuUtilizationThreshold]
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertTopic
+      OKActions:
+        - !Ref AlertTopic
+
+  LowFreeStorageSpaceAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-LowFreeStorageSpaceAlarm
+      AlarmDescription: !Sub ${FindInMap [EnvironmentConfig, !Ref EnvironmentName, AlarmPrefix]} RDS ストレージ空き容量が少なくなっています
+      MetricName: FreeStorageSpace
+      Namespace: AWS/RDS
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref DbInstanceId
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 10737418240  # 10 GB
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertTopic
+      OKActions:
+        - !Ref AlertTopic
+
+  # --------------------------------------------------
+  # ログフィルタ
+  # --------------------------------------------------
+  ErrorLogMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Sub /ecs/${EnvironmentName}-ecsforgate-api
+      FilterPattern: "ERROR"
+      MetricTransformations:
+        - MetricName: !Sub ${EnvironmentName}-ErrorCount
+          MetricNamespace: !Sub ECSForgate/${EnvironmentName}
+          MetricValue: "1"
+          DefaultValue: 0
+
+  ErrorLogAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-ErrorLogAlarm
+      AlarmDescription: !Sub ${FindInMap [EnvironmentConfig, !Ref EnvironmentName, AlarmPrefix]} エラーログが多すぎます
+      MetricName: !Sub ${EnvironmentName}-ErrorCount
+      Namespace: !Sub ECSForgate/${EnvironmentName}
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: !FindInMap [EnvironmentConfig, !Ref EnvironmentName, ErrorCountThreshold]
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertTopic
+      OKActions:
+        - !Ref AlertTopic
+
+  DatabaseErrorLogMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Sub /ecs/${EnvironmentName}-ecsforgate-api
+      FilterPattern: "?ERROR ?\"database connection\" ?\"sql exception\""
+      MetricTransformations:
+        - MetricName: !Sub ${EnvironmentName}-DbErrorCount
+          MetricNamespace: !Sub ECSForgate/${EnvironmentName}
+          MetricValue: "1"
+          DefaultValue: 0
+
+  DatabaseErrorLogAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-DatabaseErrorLogAlarm
+      AlarmDescription: !Sub ${FindInMap [EnvironmentConfig, !Ref EnvironmentName, AlarmPrefix]} データベースエラーが発生しています
+      MetricName: !Sub ${EnvironmentName}-DbErrorCount
+      Namespace: !Sub ECSForgate/${EnvironmentName}
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertTopic
+      OKActions:
+        - !Ref AlertTopic
+
+# -----------------------------------------------------
+# 出力値
+# -----------------------------------------------------
+Outputs:
+  DashboardName:
+    Description: CloudWatch ダッシュボード名
+    Value: !Ref MainDashboard
+    Export:
+      Name: !Sub ${EnvironmentName}-DashboardName
+
+  AlertTopicArn:
+    Description: アラート通知用 SNS トピック ARN
+    Value: !Ref AlertTopic
+    Export:
+      Name: !Sub ${EnvironmentName}-AlertTopicArn
+
+  XRaySamplingRuleArn:
+    Description: X-Ray サンプリングルール ARN
+    Value: !Ref XRaySamplingRule
+    Export:
+      Name: !Sub ${EnvironmentName}-XRaySamplingRuleArn
