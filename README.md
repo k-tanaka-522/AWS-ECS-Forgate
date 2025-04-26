@@ -53,37 +53,55 @@ ECSForgate/
 
 ### リポジトリのセットアップ
 
-1. GitHub リポジトリを作成
-
-2. ローカルリポジトリの初期化と GitHub への接続
+1. GitHubリポジトリのクローン
    ```bash
-   git init
-   git add .
-   git commit -m "Initial commit"
-   git branch -M main
-   git remote add origin https://github.com/your-username/ECSForgate.git
-   git push -u origin main
+   git clone https://github.com/k-tanaka-522/AWS-ECS-Forgate.git
+   cd AWS-ECS-Forgate
    ```
 
-3. 開発用ブランチの作成
+2. 開発用ブランチでの作業（新機能開発時）
    ```bash
-   git checkout -b develop
-   git push -u origin develop
+   git checkout develop
+   git checkout -b feature/your-feature-name
+   # 開発作業後
+   git push -u origin feature/your-feature-name
+   # その後GitHubでPull Requestを作成
    ```
 
 ### CI/CD パイプラインのセットアップ
 
 1. GitHub 個人アクセストークンの作成
    - GitHubの設定 > Developer settings > Personal access tokens で生成
-   - 必要な権限: `repo`, `admin:repo_hook`
+   - 必要な権限: `repo`, `admin:repo_hook` (特にwrite:repo_hookとread:repo_hook)
+   - トークンを生成し、安全な場所に保存
 
 2. CI/CD パイプラインのデプロイ
    ```bash
-   cd /path/to/ECSForgate
-   ./iac/cloudformation/scripts/deploy-cicd-github.sh <環境名>
+   cd iac/cloudformation/scripts
+   ./deploy-cicd-github.sh dev create \
+     --parameters ParameterKey=GitHubOwner,ParameterValue=k-tanaka-522 \
+     ParameterKey=GitHubRepo,ParameterValue=AWS-ECS-Forgate \
+     ParameterKey=GitHubBranch,ParameterValue=develop \
+     ParameterKey=GitHubToken,ParameterValue=あなたのGitHubトークン \
+     ParameterKey=NotificationEmail,ParameterValue=通知先メールアドレス
    ```
-   - プロンプトに従って必要な情報を入力
-   - GitHub Owner, Repository, Branch, Token など
+   
+   他の環境についても同様に設定可能：
+   ```bash
+   # ステージング環境
+   ./deploy-cicd-github.sh stg create \
+     --parameters ParameterKey=GitHubOwner,ParameterValue=k-tanaka-522 \
+     ParameterKey=GitHubRepo,ParameterValue=AWS-ECS-Forgate \
+     ParameterKey=GitHubBranch,ParameterValue=release/* \
+     ...
+   
+   # 本番環境
+   ./deploy-cicd-github.sh prd create \
+     --parameters ParameterKey=GitHubOwner,ParameterValue=k-tanaka-522 \
+     ParameterKey=GitHubRepo,ParameterValue=AWS-ECS-Forgate \
+     ParameterKey=GitHubBranch,ParameterValue=main \
+     ...
+   ```
 
 ### インフラのデプロイ
 

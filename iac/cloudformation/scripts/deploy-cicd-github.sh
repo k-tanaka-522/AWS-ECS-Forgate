@@ -95,7 +95,13 @@ aws cloudformation $ACTION \
   --region $AWS_REGION
 
 echo "Waiting for stack operation to complete..."
-aws cloudformation wait stack-$ACTION-complete \
+if [ "$ACTION" == "create-stack" ]; then
+  WAIT_ACTION="stack-create-complete"
+else
+  WAIT_ACTION="stack-update-complete"
+fi
+
+aws cloudformation wait $WAIT_ACTION \
   --stack-name $STACK_NAME \
   --region $AWS_REGION
 
