@@ -274,23 +274,52 @@ ECSイメージ凍結戦略の詳細をECS設計書とCI/CD設計書に反映し
 - CI/CD設計書に「4.1.3 ECRイメージ凍結戦略とCI/CD連携」セクションを追加
 - 環境別buildspec.ymlファイルのテンプレートを提供
 
-## 実施済み作業（2025年4月28日）
+## 実施済み作業（2025年4月29日）
 
-### 1. ECRイメージ凍結戦略の実装
+### 1. ECS設計書の更新
+1. **Java 11ランタイム選択の根拠追加**
+   - Java 11を選択した詳細な理由を「2.2.2.6 Java 11ランタイム選択の理由」として追記
+   - LTS（長期サポート）バージョンであることの利点
+   - Spring Boot 2.7.xとの互換性に関する説明
+   - モダンな言語機能とAPIのメリット
+   - AWSサービスとの互換性
+   - コンテナリソース効率とJava 11の関係性
 
-1. **環境別buildspec.ymlファイルの作成**
+### 2. ECRイメージ凍結戦略の実装と関連ドキュメント作成
+
+1. **環境別buildspec.ymlファイルの作成と理解**
    - 開発環境用：buildspec-dev.yml
    - ステージング環境用：buildspec-stg.yml
    - 本番環境用：buildspec-prd.yml
    - イメージタグ命名規則の実装（dev-{コミットハッシュ}-{日付}, stg-rc-{バージョン}, prd-candidate-{バージョン}）
    - 凍結タグ生成スクリプトの実装
 
-2. **Dockerfileのベースイメージ参照方法の更新**
-   - 環境変数でベースイメージを指定できるよう変更: `FROM ${BASE_IMAGE:-ubuntu:22.04}`
-   - ビルド時にパラメータとして渡す: `docker build --build-arg BASE_IMAGE=$BASE_IMAGE_URI`
+2. **ベースイメージ構築用ファイルとドキュメントの作成**
+   - ベースイメージ用Dockerfile（base-dockerfile）の作成
+   - ベースイメージ構築およびECRリポジトリ設定手順書（docs/base-image-setup.md）の作成
+   - ベースイメージの四半期ごとの更新手順の明確化
+
+3. **Dockerfileのベースイメージ参照方法の確認**
+   - 環境変数での柔軟な指定方法：`FROM ${BASE_IMAGE:-ubuntu:22.04}`
    - デフォルト値としてubuntu:22.04を維持（テスト・デバッグ用）
 
-### 2. ネストスタックテンプレートの確認
+### 3. Secrets Manager連携機能の実装
+
+1. **登録手順の詳細ドキュメント作成**
+   - Secrets Managerへの必要なシークレットの登録手順書作成（docs/secrets-manager-setup.md）
+   - 環境別データベース認証情報登録手順の明確化
+   - 各種シークレット管理の詳細解説
+
+2. **Spring Boot連携コードの実装**
+   - build.gradleへのSecrets Manager関連依存関係の追加
+     - spring-cloud-starter-aws-secrets-manager-config
+     - aws-java-sdk-secretsmanager
+   - Spring Cloudバージョン設定の追加
+   - bootstrap.ymlファイルの作成
+   - 環境別設定ファイル（application-*.yml）の作成
+   - DatabaseConfigクラスの実装
+
+### 4. ネストスタックテンプレートの確認
 
 1. **既存テンプレートのレビュー**
    - network.yaml：VPC、サブネット、セキュリティグループなどが適切に定義されている
@@ -303,30 +332,46 @@ ECSイメージ凍結戦略の詳細をECS設計書とCI/CD設計書に反映し
    - 環境変数やパラメータが適切に設計されている
    - 各環境（dev/stg/prd）に対応したパラメータファイルとの整合性を確認
 
-### 3. 今後の課題
+### 5. 今後の課題
 
-1. **ベースイメージ構築プロセスの確立**
+1. **Gitコミットとリポジトリへのプッシュ**
+   - 作成したファイルのコミットとプッシュ（WSL環境からの制約あり、ホストWindowsからの実行が必要）
+
+2. **ベースイメージ構築プロセスの実施**
    - `ecsforgate-base`リポジトリの作成
-   - 四半期ごとのベースイメージビルドと凍結プロセスの手順化
-   - セキュリティパッチ適用ポリシーの詳細化
+   - 作成したDockerfileとドキュメントを使用してベースイメージをビルド
+   - ECRへのプッシュと凍結タグ付与
 
-2. **Secrets Manager連携機能の実装**
-   - Spring Boot側での対応実装（ビルド依存関係の追加）
-   - 環境変数から直接シークレット参照への移行
-   - アプリケーション起動時のシークレット取得処理の実装
+3. **Secrets Managerへの登録作業**
+   - 作成したドキュメントに基づくシークレットの登録
+   - IAMロールのアクセス権設定
 
-3. **CI/CDパイプライン構成の検証**
+4. **CI/CDパイプライン構成の検証**
    - CodeBuildプロジェクトの3環境用設定の検証
    - CodePipelineの環境別設定とブランチ戦略の整合性確認
    - GitHubとの連携動作確認とWebhook設定の最終調整
 
-### 4. 次のステップ
+### 6. 次のステップ
 
-1. **環境別buildspec.ymlファイルのリポジトリへのコミット**
-2. **ベースイメージ（ecsforgate-base）の初版構築**
-3. **ECRリポジトリ設定（イミュータビリティ設定の適用）**
-4. **Secrets Managerへの必要なシークレットの登録**
-5. **CI/CDパイプラインの小規模テスト実行**
+1. **実装したファイルとコードのコミット**
+   - 以下のファイルをコミット：
+     - buildspec-dev.yml, buildspec-stg.yml, buildspec-prd.yml
+     - base-dockerfile, docs/base-image-setup.md, docs/secrets-manager-setup.md
+     - app/api/build.gradle, app/api/src/main/resources/bootstrap.yml
+     - app/api/src/main/resources/application-*.yml
+     - app/api/src/main/java/com/example/ecsforgate/api/config/
+   - コミットメッセージ：「ECR凍結戦略実装とSecrets Manager連携機能の追加」
+
+2. **ベースイメージ構築とECRへのプッシュ**
+   - docs/base-image-setup.mdのドキュメントに従って実施
+
+3. **シークレットの登録**
+   - docs/secrets-manager-setup.mdのドキュメントに従って実施
+
+4. **CI/CDパイプラインでの小規模テスト**
+   - コミット後にGitHubトリガーでCI/CDパイプラインを実行
+   - ベースイメージの参照が正しく機能しているかを確認
+   - Secrets Managerへの接続が正しく動作しているかを確認
 
 ## 次回セッションで注目すべきポイント（2025年4月29日更新）
 - 作成した環境別buildspec.ymlファイルのリポジトリへのコミット
