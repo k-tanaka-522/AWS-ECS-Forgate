@@ -1,0 +1,25 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://${host}:${port}/${dbname}
+    # username/passwordはSecrets Managerから取得
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+    show-sql: false
+
+logging:
+  level:
+    com.example.ecsforgate: INFO
+    org.hibernate.SQL: WARN
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when_authorized

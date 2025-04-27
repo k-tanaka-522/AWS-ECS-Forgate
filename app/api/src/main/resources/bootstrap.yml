@@ -1,0 +1,18 @@
+spring:
+  application:
+    name: ecsforgate-api
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:local}
+  cloud:
+    aws:
+      secretsmanager:
+        name: ${spring.profiles.active}/db/ecsforgate
+        enabled: true
+        fail-fast: false  # 開発環境ではfalseに設定
+        region: ap-northeast-1
+        prefix: /config
+        default-context: application
+        profile-separator: _
+      region:
+        auto: false
+        static: ap-northeast-1

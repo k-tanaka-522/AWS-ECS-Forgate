@@ -1,5 +1,5 @@
 # ビルドステージ
-FROM ubuntu:22.04 AS build
+FROM ${BASE_IMAGE:-ubuntu:22.04} AS build
 
 # 必要なパッケージのインストール
 RUN apt-get update && apt-get install -y \
@@ -13,7 +13,7 @@ COPY . .
 RUN ./gradlew clean build -x test
 
 # 実行ステージ
-FROM ubuntu:22.04
+FROM ${BASE_IMAGE:-ubuntu:22.04}
 
 # 必要なパッケージのインストール
 RUN apt-get update && apt-get install -y \

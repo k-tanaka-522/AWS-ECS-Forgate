@@ -104,7 +104,7 @@ GitFlowをベースとした以下のブランチ戦略を採用します：
 1. 開発者が `feature/*` ブランチを `develop` から作成し機能実装
 2. 実装完了後、`develop` へのPRを作成
 3. GitHubのプルリクエスト機能でコードレビュー
-4. GitHub Actionsトリガーによりビルド、テスト、セキュリティスキャンを実施
+4. AWS CodePipelineがWebhookトリガーにより起動し、CodeBuildによるビルド、テスト、セキュリティスキャンを実施
 5. すべてのチェックが通った後、`develop` にマージ
 6. リリース準備時、`release/*` ブランチを `develop` から作成
 7. `release/*` ブランチでの統合テスト後、`main` へのPRを作成
