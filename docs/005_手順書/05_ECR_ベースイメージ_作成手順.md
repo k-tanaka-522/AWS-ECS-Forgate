@@ -1,5 +1,63 @@
 # ECRベースイメージ作成手順
 
+
+## 実行環境の前提条件
+
+この手順書は以下の環境を前提としています：
+
+### 実行環境
+- ホストOS: Windows 10/11
+- WSL: Ubuntu 22.04 LTS
+- コマンドライン環境:
+  - AWS CLI コマンド: WSL環境
+  - Git コマンド: WSL環境
+  - bashスクリプト (.sh): WSL環境
+  - Docker コマンド: Windows環境（Docker Desktop）
+
+### ツールのバージョン要件
+- AWS CLI: バージョン2.x以上（WSL上にインストール済み）
+- Git: バージョン2.x以上（WSL上にインストール済み）
+- Docker: Docker Desktop for Windows 4.x以上（WSL2統合有効）
+
+### 環境設定の確認
+
+**WSL上でのAWS CLI確認:**
+```bash
+# WSL環境で実行
+# WSLターミナルで実行
+aws --version
+aws sts get-caller-identity
+```
+
+**WSL上でのGit確認:**
+```bash
+# WSL環境で実行
+# WSLターミナルで実行
+git --version
+```
+
+**Windows上でのDocker確認:**
+```bash
+# WSL環境で実行
+# Windows PowerShellまたはCMDで実行
+docker --version
+docker run --rm hello-world
+```
+
+### ファイルパスの注意事項
+
+コマンドの実行環境に応じてパスの表記が異なります：
+- WSL環境でのプロジェクトパス: `/mnt/c/dev2/ECSForgate/`
+- Windows環境でのプロジェクトパス: `C:\dev2\ECSForgate\`
+
+この手順書のコマンド例はすべてWSL環境のパス表記を前提としています。Windows環境で実行する場合は適宜パスを変換してください。
+
+### 操作環境の切り替え
+
+各コマンドを実行する際は、適切な環境（WSLまたはWindows）に切り替えてください。
+
+- WSL環境への切り替え: Windows PowerShellから `wsl` コマンドを実行
+- Windows環境への切り替え: WSLで `exit` コマンドを実行してWSLを終了
 ## 関連設計書
 - [ECS Fargate詳細設計書](/docs/002_設計/components/ecs-design.md)
 
@@ -7,18 +65,76 @@
 本ドキュメントでは、ECS Fargate設計書に基づいたベースイメージの構築とECRリポジトリへの登録手順を説明します。
 ベースイメージは四半期ごとに更新され、セキュリティパッチを適用したUbuntu 22.04ベースのイメージとして管理されます。
 
-## 前提条件
-- AWS CLIがインストールされ、適切な権限を持つIAMユーザーで設定済み
-- Dockerがインストールされている
-- プロジェクトリポジトリのクローンがローカル環境にある
+## 前提条件チェックリスト
+以下の前提条件を確認してから作業を開始してください：
 
+- [ ] AWS CLIがインストールされている（バージョン2.0以上推奨）
+```bash
+# WSL環境で実行
+  aws --version
+  # 出力例: aws-cli/2.9.19 Python/3.9.11 Linux/5.10.16.3-microsoft-standard-WSL2 exe/x86_64.ubuntu.22 prompt/off
+  ```
+
+- [ ] AWS CLIが適切な権限を持つIAMユーザーで設定済み
+```bash
+# WSL環境で実行
+  aws sts get-caller-identity
+  # 出力例：
+  # {
+  #     "UserId": "AIDAXXXXXXXXXXXXXX",
+  #     "Account": "123456789012",
+  #     "Arn": "arn:aws:iam::123456789012:user/username"
+  # }
+  ```
+
+- [ ] 必要なIAM権限が付与されている
+  - ECRリポジトリ作成権限：`ecr:CreateRepository`
+  - ECRイメージプッシュ権限：`ecr:PutImage`, `ecr:InitiateLayerUpload`, 等
+  - ECRリポジトリポリシー設定権限：`ecr:PutLifecyclePolicy`
+
+- [ ] Dockerがインストールされている
+```bash
+# Windows環境（Docker Desktop）で実行
+  docker --version
+  # 出力例: Docker version 20.10.21, build baeda1f
+  ```
+
+- [ ] プロジェクトリポジトリのクローンがローカル環境にある
+```bash
+# WSL環境で実行
+  # プロジェクトルートディレクトリに移動
+  cd /mnt/c/dev2/ECSForgate
+  # base-dockerfileが存在することを確認
+  ls -l base-dockerfile
+  ```
+
+### 【実行環境: WSL】
 ## 1. ECRリポジトリの作成
+
+作業を開始する前に、プロジェクトのルートディレクトリに移動していることを確認してください：
+
+以下のコマンドをターミナルで順番に実行してください：
+```bash
+# WSL環境で実行
+cd /mnt/c/dev2/ECSForgate
+pwd
+# 出力例: /mnt/c/dev2/ECSForgate
+```
 
 ベースイメージ用のリポジトリを作成します。
 
+以下のコマンドをターミナルで順番に実行してください：
 ```bash
+# WSL環境で実行
 # AWS CLI設定の確認
 aws configure list
+# リージョンとアカウント情報が正しいことを確認
+
+# AWSアカウントIDとリージョンを変数に格納（後続のコマンドで使用）
+AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+AWS_REGION=$(aws configure get region)
+echo "AWS Account ID: ${AWS_ACCOUNT_ID}"
+echo "AWS Region: ${AWS_REGION}"
 
 # ベースイメージ用のECRリポジトリ作成
 aws ecr create-repository \
@@ -26,45 +142,135 @@ aws ecr create-repository \
     --image-scanning-configuration scanOnPush=true \
     --image-tag-mutability IMMUTABLE
 
+# 【確認ポイント】
+# 成功時の出力例：
+# {
+#     "repository": {
+#         "repositoryArn": "arn:aws:ecr:ap-northeast-1:123456789012:repository/ecsforgate-base",
+#         "registryId": "123456789012",
+#         "repositoryName": "ecsforgate-base",
+#         "repositoryUri": "123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/ecsforgate-base",
+#         "createdAt": "2025-04-28T10:00:00.000000+09:00",
+#         "imageTagMutability": "IMMUTABLE",
+#         "imageScanningConfiguration": {
+#             "scanOnPush": true
+#         }
+#     }
+# }
+
 # アプリケーションイメージ用のECRリポジトリ作成（まだ作成されていない場合）
 aws ecr create-repository \
     --repository-name ecsforgate-api \
     --image-scanning-configuration scanOnPush=true \
     --image-tag-mutability IMMUTABLE
 
+# 【エラー対応】
+# リポジトリがすでに存在する場合は以下のエラーが表示されます：
+# An error occurred (RepositoryAlreadyExistsException) when calling the CreateRepository operation: The repository with name 'ecsforgate-base' already exists in the registry with id '123456789012'
+# この場合は問題ありませんので、次のステップに進んでください。
+
 # リポジトリの確認
-aws ecr describe-repositories
+echo "作成したリポジトリを確認します..."
+aws ecr describe-repositories --repository-names ecsforgate-base ecsforgate-api
+
+# 【確認ポイント】
+# - 両方のリポジトリが表示されること
+# - imageTagMutabilityが"IMMUTABLE"であること
+# - imageScanningConfigurationのscanOnPushがtrueであること
 ```
 
+### 【実行環境: Windows + WSL】
 ## 2. ベースイメージの構築とプッシュ
 
-ベースイメージを構築し、ECRにプッシュします。
+ベースイメージを構築し、ECRにプッシュします。まず、base-dockerfileの内容を確認しましょう。
 
+以下のコマンドをターミナルで実行してください：
 ```bash
+# Windows環境（Docker Desktop）で実行
+# base-dockerfileの内容確認
+cat base-dockerfile
+# 注意：Ubuntu 22.04ベース、Java 11ランタイムの構成になっていることを確認
+```
+
+環境変数を設定し、イメージをビルドしてプッシュします。
+
+以下の内容の一時シェルスクリプト（build-push-image.sh）を作成し、実行許可を付与してから実行してください：
+```bash
+# WSL環境で実行
+#!/bin/bash
 # 環境変数の設定
-AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-AWS_REGION=$(aws configure get region)
+# 前のステップで設定した変数が残っていない場合は再度設定
+if [ -z "$AWS_ACCOUNT_ID" ]; then
+  AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+fi
+if [ -z "$AWS_REGION" ]; then
+  AWS_REGION=$(aws configure get region)
+fi
 REPOSITORY_URI=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/ecsforgate-base
 IMAGE_TAG=base-2025-Q2-frozen
 
-# ECRへのログイン
+echo "ビルドするイメージ: ${REPOSITORY_URI}:${IMAGE_TAG}"
+
+# ECRへのログイン（24時間有効）
+echo "ECRへログインしています..."
 aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
 
+# 【確認ポイント】
+# 成功時の出力: Login Succeeded
+# 失敗時: 認証情報の誤りやネットワークエラーなどのメッセージが表示
+
 # ベースイメージのビルド
+echo "ベースイメージをビルドしています..."
 docker build -t ${REPOSITORY_URI}:${IMAGE_TAG} -f base-dockerfile .
 
-# ベースイメージのプッシュ
+# 【確認ポイント】
+# - ビルドが成功したか（最後に "Successfully built xxxx" と表示される）
+# - 各ステップでエラーがないか
+# - ビルドが完了したら以下のコマンドでイメージを確認
+docker images | grep ecsforgate-base
+
+# ベースイメージのプッシュ（初回は時間がかかるため辛抱強く待つ）
+echo "ベースイメージをECRにプッシュしています..."
 docker push ${REPOSITORY_URI}:${IMAGE_TAG}
 
+# 【確認ポイント】
+# - プッシュが完了すると「latest: digest: sha256:xxxx size: yyyy」のような表示がされる
+# - エラーが発生した場合は権限の問題やネットワークの問題を確認
+
 # イメージの確認
+echo "ECRにプッシュされたイメージを確認しています..."
 aws ecr describe-images --repository-name ecsforgate-base
+
+# 【確認ポイント】
+# - imageTagsに「base-2025-Q2-frozen」が含まれていること
+# - imageScanStatusがcompletedであること（scanOnPush=trueの場合）
+# - エラーがある場合は以下のコマンドでイメージの詳細情報を取得
+# aws ecr describe-images --repository-name ecsforgate-base --image-ids imageTag=${IMAGE_TAG}
 ```
 
+スクリプトを作成したら、以下のコマンドで実行許可を付与して実行します：
+```bash
+# WSL環境で実行
+chmod +x build-push-image.sh
+./build-push-image.sh
+```
+
+ビルドやプッシュに失敗した場合は、以下の点を確認してください。
+
+- AWS CLIの認証情報（AKID/SAK）が正しくセットアップされているか
+- ECRリポジトリへのプッシュ権限があるか
+- Dockerデーモンが起動しているか
+- インターネット接続に問題がないか
+- base-dockerfileの構文エラーがないか
+
+### 【実行環境: WSL】
 ## 3. ECRイミュータビリティ設定の確認
 
 タグの変更を防止するイミュータビリティ設定を確認します。
 
+以下のコマンドをターミナルで順番に実行してください：
 ```bash
+# WSL環境で実行
 # ベースイメージリポジトリの設定確認
 aws ecr describe-repositories --repository-names ecsforgate-base --query 'repositories[0].imageTagMutability'
 
@@ -81,14 +287,16 @@ aws ecr put-image-tag-mutability \
     --image-tag-mutability IMMUTABLE
 ```
 
+### 【実行環境: WSL】
 ## 4. ライフサイクルポリシーの設定
 
 古いイメージを自動的に削除するためのライフサイクルポリシーを設定します（オプション）。
 ただし、凍結されたベースイメージは長期保持が必要なため、対象外とします。
 
-```bash
-# ベースイメージのライフサイクルポリシー（frozen タグ以外の古いイメージを削除）
-cat > base-lifecycle-policy.json << 'EOF'
+以下の内容のポリシーファイルを作成してください：
+
+base-lifecycle-policy.jsonファイルを作成してください：
+```json
 {
     "rules": [
         {
@@ -119,10 +327,10 @@ cat > base-lifecycle-policy.json << 'EOF'
         }
     ]
 }
-EOF
+```
 
-# アプリケーションイメージのライフサイクルポリシー
-cat > app-lifecycle-policy.json << 'EOF'
+app-lifecycle-policy.jsonファイルを作成してください：
+```json
 {
     "rules": [
         {
@@ -192,8 +400,11 @@ cat > app-lifecycle-policy.json << 'EOF'
         }
     ]
 }
-EOF
+```
 
+ポリシーファイルを作成したら、以下のコマンドをターミナルで実行してください：
+```bash
+# WSL環境で実行
 # ライフサイクルポリシーの適用
 aws ecr put-lifecycle-policy \
     --repository-name ecsforgate-base \
@@ -204,16 +415,172 @@ aws ecr put-lifecycle-policy \
     --lifecycle-policy-text file://app-lifecycle-policy.json
 ```
 
+### 【実行環境: Windows + WSL】
 ## 5. 四半期ごとの更新手順
 
-ベースイメージの四半期ごとの更新は以下の手順で行います：
+ベースイメージは四半期ごとに更新し、セキュリティパッチを適用することを推奨しています。以下の詳細な手順で実施してください。
 
-1. 新しいベースイメージ用のDockerfileを作成（前回のDockerfileを元に、セキュリティパッチと依存関係を更新）
-2. 新しいタグ（例：base-2025-Q3-frozen）でイメージをビルド
-3. テスト環境でイメージの動作確認
-4. 新しいイメージをECRにプッシュ
-5. アプリケーションのbuildspec.ymlファイルを更新して新しいベースイメージを参照
-6. 更新されたbuildspec.ymlファイルをコミットしてCI/CDパイプラインを通じてアプリケーションを再ビルド
+### 5.1 新しいベースイメージ用のDockerfileを作成
+
+以下のコマンドをターミナルで実行してください：
+```bash
+# WSL環境で実行
+# 前回のDockerfileをコピーして新しいバージョンを作成
+cp base-dockerfile base-dockerfile.$(date +%Y%m%d)
+
+# 新しいDockerfileを編集
+nano base-dockerfile
+
+# 主な更新箇所：
+# 1. LABELのversion値とbuild.dateを更新
+# 2. IMAGETAGの四半期表記を変更（例：2025-Q2 → 2025-Q3）
+# 3. 必要に応じてJavaやUbuntuのバージョンを更新
+```
+
+### 5.2 新しいタグでイメージをビルド
+
+以下の内容の一時シェルスクリプト（build-new-base-image.sh）を作成し、実行許可を付与してから実行してください：
+```bash
+# WSL環境で実行
+#!/bin/bash
+# 環境変数を設定
+AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+AWS_REGION=$(aws configure get region)
+REPOSITORY_URI=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/ecsforgate-base
+# 四半期を更新したタグを設定（例：Q2 → Q3）
+IMAGE_TAG=base-2025-Q3-frozen
+
+# ECRへのログイン
+aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+
+# 新しいベースイメージをビルド
+docker build -t ${REPOSITORY_URI}:${IMAGE_TAG} -f base-dockerfile .
+```
+
+スクリプトを作成したら、以下のコマンドで実行許可を付与して実行します：
+```bash
+# WSL環境で実行
+chmod +x build-new-base-image.sh
+./build-new-base-image.sh
+```
+
+### 5.3 ベースイメージの検証
+
+開発環境でベースイメージを使用してアプリケーションをビルドし、正常に動作することを確認します。
+
+以下の内容の一時シェルスクリプト（test-base-image.sh）を作成し、実行許可を付与してから実行してください：
+```bash
+# WSL環境で実行
+#!/bin/bash
+# 環境変数の設定
+AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+AWS_REGION=$(aws configure get region)
+REPOSITORY_URI=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/ecsforgate-base
+IMAGE_TAG=base-2025-Q3-frozen
+
+# 検証用にテストアプリケーションをビルド
+cd /tmp
+mkdir -p test-app
+cd test-app
+
+# テスト用のDockerfile作成
+cat > Dockerfile << EOF
+FROM ${REPOSITORY_URI}:${IMAGE_TAG}
+COPY . /app
+WORKDIR /app
+RUN echo "Java version: " && java -version
+CMD ["java", "-version"]
+EOF
+
+# テストイメージをビルド
+docker build -t ecsforgate-test:latest .
+
+# テストイメージを実行して動作確認
+docker run --rm ecsforgate-test
+
+# 確認ポイント：
+# - Java 11が正しく動作すること
+# - Ubuntu 22.04のコマンドが動作すること
+# - タイムゾーンとロケールが日本語に設定されていること
+```
+
+スクリプトを作成したら、以下のコマンドで実行許可を付与して実行します：
+```bash
+# WSL環境で実行
+chmod +x test-base-image.sh
+./test-base-image.sh
+```
+
+### 5.4 新しいイメージをECRにプッシュ
+
+検証が完了したら、イメージをECRにプッシュします。
+
+以下のコマンドをターミナルで順番に実行してください：
+```bash
+# WSL環境で実行
+# 環境変数の設定
+AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+AWS_REGION=$(aws configure get region)
+REPOSITORY_URI=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/ecsforgate-base
+IMAGE_TAG=base-2025-Q3-frozen
+
+# イメージをプッシュ
+docker push ${REPOSITORY_URI}:${IMAGE_TAG}
+
+# プッシュされたイメージを確認
+aws ecr describe-images --repository-name ecsforgate-base --query 'imageDetails[?contains(imageTags, `'"${IMAGE_TAG}"'`)]'
+```
+
+### 5.5 buildspec.ymlファイルの更新
+
+各環境のbuildspec.ymlファイルを更新して、新しいベースイメージを参照するようにします。
+
+以下のコマンドをターミナルで順番に実行してください：
+```bash
+# WSL環境で実行
+# 開発環境のbuildspec更新
+sed -i "s/BASE_IMAGE_TAG: \"base-2025-Q2-frozen\"/BASE_IMAGE_TAG: \"base-2025-Q3-frozen\"/" buildspec-dev.yml
+
+# ステージング環境のbuildspec更新
+sed -i "s/BASE_IMAGE_TAG: \"base-2025-Q2-frozen\"/BASE_IMAGE_TAG: \"base-2025-Q3-frozen\"/" buildspec-stg.yml
+
+# 本番環境のbuildspec更新
+sed -i "s/BASE_IMAGE_TAG: \"base-2025-Q2-frozen\"/BASE_IMAGE_TAG: \"base-2025-Q3-frozen\"/" buildspec-prd.yml
+
+# 変更を確認
+grep -r "BASE_IMAGE_TAG" buildspec-*.yml
+```
+
+### 5.6 変更をコミットしてCI/CDパイプラインでビルド
+
+buildspecの変更をコミットし、CI/CDパイプラインを通じてアプリケーションを再ビルドします。
+
+以下のコマンドをターミナルで順番に実行してください：
+```bash
+# WSL環境で実行
+# 変更をコミット
+git add buildspec-*.yml
+git commit -m "Update base image to 2025-Q3-frozen"
+
+# リモートリポジトリにプッシュ
+git push origin develop
+
+# CI/CDパイプラインの実行状況を確認
+aws codepipeline get-pipeline-state --name ecsforgate-pipeline-dev
+```
+
+### 5.7 イメージ更新のタイミングと計画
+
+ベースイメージ更新は以下のスケジュールで行うことを推奨します：
+
+| 四半期 | 更新タイミング | イメージタグ |
+|------|-------------|------------|
+| Q1 | 1月第2週 | base-YYYY-Q1-frozen |
+| Q2 | 4月第2週 | base-YYYY-Q2-frozen |
+| Q3 | 7月第2週 | base-YYYY-Q3-frozen |
+| Q4 | 10月第2週 | base-YYYY-Q4-frozen |
+
+ベースイメージ更新後は、まず開発環境でアプリケーションをビルドしてテストし、問題がなければステージング環境、最後に本番環境の順に適用します。
 
 このプロセスにより、セキュリティパッチを含む最新のベースイメージを使用しながら、アプリケーションの安定性と再現性を確保できます。
 
