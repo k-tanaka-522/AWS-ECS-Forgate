@@ -1,0 +1,142 @@
+version: 0.2
+
+env:
+  variables:
+    BASE_IMAGE_REPO: "ecsforgate-base"
+    BASE_IMAGE_TAG: "base-2025-Q2-frozen"
+    APP_IMAGE_REPO: "ecsforgate-api"
+
+phases:
+  install:
+    runtime-versions:
+      java: corretto11
+    commands:
+      - echo Installing dependencies...
+      - apt-get update -y
+      - apt-get install -y curl jq
+  pre_build:
+    commands:
+      - echo Logging in to Amazon ECR...
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+      - BASE_IMAGE_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$BASE_IMAGE_REPO:$BASE_IMAGE_TAG
+      - APP_REPOSITORY_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$APP_IMAGE_REPO
+      # リリースブランチ名からバージョンを抽出（例：release/1.2.0 → 1.2.0）
+      - VERSION=$(echo $CODEBUILD_WEBHOOK_HEAD_REF | sed 's/refs\/heads\/release\///')
+      - IMAGE_TAG=stg-rc-${VERSION}
+      - echo Using base image $BASE_IMAGE_URI
+      - echo Building release candidate image $APP_REPOSITORY_URI:$IMAGE_TAG
+      - echo Checking for Secrets Manager secrets...
+      - aws secretsmanager list-secrets --query "SecretList[?starts_with(Name, 'ecsforgate/${ENVIRONMENT}/')].Name" --output text
+  build:
+    commands:
+      - echo Build started on `date`
+      - echo Building the Java application...
+      - cd app/api
+      - ./gradlew clean build
+      - echo Building the Docker image with frozen base image...
+      - docker build -t $APP_REPOSITORY_URI:$IMAGE_TAG --build-arg BASE_IMAGE=$BASE_IMAGE_URI .
+  post_build:
+    commands:
+      - echo Build completed on `date`
+      - echo Running extended tests...
+      - cd app/api
+      - ./gradlew test integrationTest
+      - echo Pushing the Docker image...
+      - docker push $APP_REPOSITORY_URI:$IMAGE_TAG
+      - echo Writing artifacts...
+      - cd $CODEBUILD_SRC_DIR
+      - aws cloudformation package --template-file iac/cloudformation/templates/ecs.yaml --s3-bucket $ARTIFACT_BUCKET --s3-prefix $ENVIRONMENT --output-template-file ecs-packaged.yaml
+      - sed -i "s|<IMAGE_URI>|$APP_REPOSITORY_URI:$IMAGE_TAG|g" taskdef.json
+      - echo Writing container definition file...
+      - |
+        cat > container-definition.json << 'EOF'
+        {
+          "containerDefinitions": [
+            {
+              "name": "api-container",
+              "image": "$APP_REPOSITORY_URI:$IMAGE_TAG",
+              "essential": true,
+              "portMappings": [
+                {
+                  "hostPort": 8080,
+                  "containerPort": 8080,
+                  "protocol": "tcp"
+                }
+              ],
+              "environment": [
+                {
+                  "name": "SPRING_PROFILES_ACTIVE",
+                  "value": "$ENVIRONMENT"
+                },
+                {
+                  "name": "JAVA_OPTS",
+                  "value": "-Xms512m -Xmx1536m -XX:+UseG1GC"
+                },
+                {
+                  "name": "APP_LOG_LEVEL",
+                  "value": "INFO"
+                },
+                {
+                  "name": "AWS_XRAY_CONTEXT_MISSING",
+                  "value": "LOG_ERROR"
+                },
+                {
+                  "name": "AWS_XRAY_DAEMON_ADDRESS",
+                  "value": "127.0.0.1:2000"
+                }
+              ],
+              "secrets": [
+                {
+                  "name": "SPRING_DATASOURCE_USERNAME",
+                  "valueFrom": "arn:aws:secretsmanager:$AWS_DEFAULT_REGION:$AWS_ACCOUNT_ID:secret:$ENVIRONMENT/db/ecsforgate:username::"
+                },
+                {
+                  "name": "SPRING_DATASOURCE_PASSWORD",
+                  "valueFrom": "arn:aws:secretsmanager:$AWS_DEFAULT_REGION:$AWS_ACCOUNT_ID:secret:$ENVIRONMENT/db/ecsforgate:password::"
+                }
+              ],
+              "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                  "awslogs-group": "/ecs/ecsforgate-api-$ENVIRONMENT",
+                  "awslogs-region": "$AWS_DEFAULT_REGION",
+                  "awslogs-stream-prefix": "ecs"
+                }
+              },
+              "healthCheck": {
+                "command": [
+                  "CMD-SHELL",
+                  "curl -f http://localhost:8080/api/health || exit 1"
+                ],
+                "interval": 30,
+                "timeout": 5,
+                "retries": 3,
+                "startPeriod": 60
+              }
+            }
+          ]
+        }
+        EOF
+      - sed -i "s|\$APP_REPOSITORY_URI|$APP_REPOSITORY_URI|g" container-definition.json
+      - sed -i "s|\$IMAGE_TAG|$IMAGE_TAG|g" container-definition.json
+      - sed -i "s|\$ENVIRONMENT|$ENVIRONMENT|g" container-definition.json
+      - sed -i "s|\$AWS_DEFAULT_REGION|$AWS_DEFAULT_REGION|g" container-definition.json
+      - sed -i "s|\$AWS_ACCOUNT_ID|$AWS_ACCOUNT_ID|g" container-definition.json
+      - echo Build and push completed for staging environment image $APP_REPOSITORY_URI:$IMAGE_TAG
+      # バージョン情報をファイルに保存（本番環境デプロイで使用）
+      - echo $VERSION > version.txt
+
+artifacts:
+  files:
+    - appspec.yml
+    - taskdef.json
+    - ecs-packaged.yaml
+    - container-definition.json
+    - iac/cloudformation/config/$ENVIRONMENT/parameters.json
+    - version.txt
+  discard-paths: no
+
+cache:
+  paths:
+    - '/root/.gradle/caches/**/*'
+    - '/root/.gradle/wrapper/**/*'
