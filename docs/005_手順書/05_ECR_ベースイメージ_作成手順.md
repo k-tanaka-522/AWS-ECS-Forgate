@@ -9,13 +9,13 @@
 - ホストOS: Windows 10/11
 - WSL: Ubuntu 22.04 LTS
 - コマンドライン環境:
-  - AWS CLI コマンド: WSL環境
+  - AWS CLI コマンド: WSL環境およびWindows環境の両方に設定済み
   - Git コマンド: WSL環境
   - bashスクリプト (.sh): WSL環境
   - Docker コマンド: Windows環境（Docker Desktop）
 
 ### ツールのバージョン要件
-- AWS CLI: バージョン2.x以上（WSL上にインストール済み）
+- AWS CLI: バージョン2.x以上（WSLおよびWindows環境の両方にインストール済み）
 - Git: バージョン2.x以上（WSL上にインストール済み）
 - Docker: Docker Desktop for Windows 4.x以上（WSL2統合有効）
 
@@ -24,7 +24,13 @@
 **WSL上でのAWS CLI確認:**
 ```bash
 # WSL環境で実行
-# WSLターミナルで実行
+aws --version
+aws sts get-caller-identity
+```
+
+**Windows上でのAWS CLI確認:**
+```powershell
+# Windows PowerShell環境で実行
 aws --version
 aws sts get-caller-identity
 ```
@@ -32,14 +38,12 @@ aws sts get-caller-identity
 **WSL上でのGit確認:**
 ```bash
 # WSL環境で実行
-# WSLターミナルで実行
 git --version
 ```
 
 **Windows上でのDocker確認:**
-```bash
-# WSL環境で実行
-# Windows PowerShellまたはCMDで実行
+```powershell
+# Windows PowerShell環境で実行
 docker --version
 docker run --rm hello-world
 ```
@@ -194,66 +198,134 @@ cat base-dockerfile
 
 環境変数を設定し、イメージをビルドしてプッシュします。
 
-以下の内容の一時シェルスクリプト（build-push-image.sh）を作成し、実行許可を付与してから実行してください：
+## 2. ベースイメージの構築とプッシュ
+
+ここからは、WSL環境とWindows PowerShell環境を切り替えながら作業を進めます。
+作業の流れは以下の通りです：
+
+1. WSL環境：AWS認証情報を取得 → 
+2. Windows PowerShell環境：Dockerイメージをビルド・プッシュ → 
+3. WSL環境：イメージの確認
+
+### 【手順1：WSL環境で実行】
+#### 2.1 プロジェクトディレクトリへの移動
+
+1. WSLターミナルを開きます（Windows検索で「WSL」と入力または PowerShellで「wsl」コマンドを実行）
+
+2. 以下のコマンドをWSLターミナルに貼り付け、実行してプロジェクトディレクトリに移動します：
+
 ```bash
-# WSL環境で実行
-#!/bin/bash
-# 環境変数の設定
-# 前のステップで設定した変数が残っていない場合は再度設定
-if [ -z "$AWS_ACCOUNT_ID" ]; then
-  AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-fi
-if [ -z "$AWS_REGION" ]; then
-  AWS_REGION=$(aws configure get region)
-fi
-REPOSITORY_URI=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/ecsforgate-base
-IMAGE_TAG=base-2025-Q2-frozen
+# プロジェクトディレクトリに移動
+cd /mnt/c/dev2/ECSForgate
+pwd
+# 出力例: /mnt/c/dev2/ECSForgate
+```
 
-echo "ビルドするイメージ: ${REPOSITORY_URI}:${IMAGE_TAG}"
+### 【手順2：Windows PowerShell環境で実行】
+#### 2.2 PowerShellでDocker操作を実行する
 
-# ECRへのログイン（24時間有効）
-echo "ECRへログインしています..."
-aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+1. Windows PowerShellを開きます（Windows検索で「PowerShell」と入力）
 
-# 【確認ポイント】
-# 成功時の出力: Login Succeeded
-# 失敗時: 認証情報の誤りやネットワークエラーなどのメッセージが表示
+2. 以下のコマンドをPowerShellに貼り付けて実行します：
+
+```powershell
+# AWS CLIから情報を取得（AWS CLIが設定済みの前提）
+$AWS_ACCOUNT_ID = aws sts get-caller-identity --query Account --output text
+$AWS_REGION = aws configure get region
+$REPOSITORY_URI = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/ecsforgate-base"
+$IMAGE_TAG = "base-2025-Q2-frozen"
+
+# 設定した情報を確認
+Write-Host "================================================="
+Write-Host "設定情報:"
+Write-Host "AWS Account ID: $AWS_ACCOUNT_ID"
+Write-Host "AWS Region: $AWS_REGION"
+Write-Host "イメージURI: $REPOSITORY_URI"
+Write-Host "イメージタグ: $IMAGE_TAG"
+Write-Host "================================================="
+```
+
+3. 情報が正しいことを確認したら、以下のコマンドを実行してECRにログインします：
+
+```powershell
+# ECRへのログイン
+Write-Host "ECRへログインしています..."
+aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+```
+
+4. ログインが成功したら（「**Login Succeeded**」と表示される）、以下のコマンドを実行してビルドを行います：
+
+```powershell
+# プロジェクトディレクトリに移動
+cd C:\dev2\ECSForgate
+
+# base-dockerfileの内容確認
+Write-Host "base-dockerfileの内容確認:"
+Get-Content base-dockerfile | Select-Object -First 10
 
 # ベースイメージのビルド
-echo "ベースイメージをビルドしています..."
-docker build -t ${REPOSITORY_URI}:${IMAGE_TAG} -f base-dockerfile .
+Write-Host "ベースイメージをビルドしています..."
+docker build -t "${REPOSITORY_URI}:${IMAGE_TAG}" -f base-dockerfile .
+```
 
-# 【確認ポイント】
-# - ビルドが成功したか（最後に "Successfully built xxxx" と表示される）
-# - 各ステップでエラーがないか
-# - ビルドが完了したら以下のコマンドでイメージを確認
-docker images | grep ecsforgate-base
+5. ビルドが成功したら、以下のコマンドでイメージを確認します：
 
-# ベースイメージのプッシュ（初回は時間がかかるため辛抱強く待つ）
-echo "ベースイメージをECRにプッシュしています..."
-docker push ${REPOSITORY_URI}:${IMAGE_TAG}
+```powershell
+# ビルドしたイメージの確認
+Write-Host "ビルドしたイメージの確認:"
+docker images | Select-String ecsforgate-base
+```
 
-# 【確認ポイント】
-# - プッシュが完了すると「latest: digest: sha256:xxxx size: yyyy」のような表示がされる
-# - エラーが発生した場合は権限の問題やネットワークの問題を確認
+6. イメージが表示されたら、以下のコマンドでECRにプッシュします：
 
-# イメージの確認
+```powershell
+# ECRへのイメージプッシュ（時間がかかります）
+Write-Host "ベースイメージをECRにプッシュしています..."
+Write-Host "（初回は時間がかかりますので、辛抱強くお待ちください）"
+docker push "${REPOSITORY_URI}:${IMAGE_TAG}"
+```
+
+7. プッシュが成功したら以下のような出力が表示されます：
+```
+The push refers to repository [123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/ecsforgate-base]
+...
+base-2025-Q2-frozen: digest: sha256:abcdef1234567890... size: 1234
+```
+
+### 【手順3：WSL環境に戻って実行】
+#### 2.3 プッシュされたイメージの確認
+
+1. WSLターミナルに戻ります（PowerShellからWSLに切り替えるには「wsl」コマンドを実行）
+
+2. 以下のコマンドを実行して、イメージがECRに正しくプッシュされたか確認します：
+
+```bash
+# プロジェクトディレクトリに移動
+cd /mnt/c/dev2/ECSForgate
+
+# ECRのイメージを確認
 echo "ECRにプッシュされたイメージを確認しています..."
 aws ecr describe-images --repository-name ecsforgate-base
-
-# 【確認ポイント】
-# - imageTagsに「base-2025-Q2-frozen」が含まれていること
-# - imageScanStatusがcompletedであること（scanOnPush=trueの場合）
-# - エラーがある場合は以下のコマンドでイメージの詳細情報を取得
-# aws ecr describe-images --repository-name ecsforgate-base --image-ids imageTag=${IMAGE_TAG}
 ```
 
-スクリプトを作成したら、以下のコマンドで実行許可を付与して実行します：
-```bash
-# WSL環境で実行
-chmod +x build-push-image.sh
-./build-push-image.sh
-```
+3. 出力に `"imageTags": [ "base-2025-Q2-frozen" ]` が含まれていれば成功です。
+
+#### トラブルシューティング
+
+**問題: ECRログインに失敗する場合**
+- AWS CLIの認証情報が正しく設定されているか確認してください：`aws configure list`
+- AWS CLIのバージョンが最新か確認してください：`aws --version`
+- リージョンが正しいか確認してください
+
+**問題: Dockerビルドに失敗する場合**
+- Docker Desktopが起動しているか確認してください
+- インターネット接続を確認してください
+- base-dockerfileの構文に問題がないか確認してください
+
+**問題: イメージのプッシュに失敗する場合**
+- ECRリポジトリへのプッシュ権限があるか確認してください
+- ネットワーク接続を確認してください
+- ECRリポジトリが存在するか確認してください：`aws ecr describe-repositories`
 
 ビルドやプッシュに失敗した場合は、以下の点を確認してください。
 

@@ -25,9 +25,9 @@ RUN ln -fs /usr/share/zoneinfo/Asia/Tokyo /etc/localtime \
 
 # ロケールを日本語に設定
 RUN locale-gen ja_JP.UTF-8
-ENV LANG ja_JP.UTF-8
-ENV LANGUAGE ja_JP:ja
-ENV LC_ALL ja_JP.UTF-8
+ENV LANG=ja_JP.UTF-8
+ENV LANGUAGE=ja_JP:ja
+ENV LC_ALL=ja_JP.UTF-8
 
 # Amazon Corretto 11のインストール
 RUN curl -L -o /tmp/amazon-corretto-11.tar.gz https://corretto.aws/downloads/latest/amazon-corretto-11-x64-linux-jdk.tar.gz \
@@ -37,8 +37,8 @@ RUN curl -L -o /tmp/amazon-corretto-11.tar.gz https://corretto.aws/downloads/lat
     && mv /usr/lib/jvm/amazon-corretto-* /usr/lib/jvm/amazon-corretto-11
 
 # 環境変数の設定
-ENV JAVA_HOME /usr/lib/jvm/amazon-corretto-11
-ENV PATH $JAVA_HOME/bin:$PATH
+ENV JAVA_HOME=/usr/lib/jvm/amazon-corretto-11
+ENV PATH=$JAVA_HOME/bin:$PATH
 
 # 必要なツールのインストール
 RUN apt-get update && apt-get install -y \
