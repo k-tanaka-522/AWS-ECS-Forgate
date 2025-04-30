@@ -48,6 +48,10 @@ Desktop.ini
 packaged-template.yaml
 samconfig.toml
 
+# CloudFormation機密情報
+iac/cloudformation/config/*/parameters.json
+iac/cloudformation/config/*/parameters.json.bak
+
 # ローカル設定ファイル
 application-local.yml
 application-local.properties

@@ -73,14 +73,22 @@ echo "メインテンプレートをアップロードしています..."
 aws s3 cp "iac/cloudformation/templates/environment-main.yaml" "s3://${S3_BUCKET}/cloudformation/templates/environment-main.yaml" --region ${REGION}
 
 # パラメータファイルの準備
+PARAMETERS_TEMPLATE="iac/cloudformation/config/${ENVIRONMENT}/parameters.json.template"
 PARAMETERS_FILE="iac/cloudformation/config/${ENVIRONMENT}/parameters.json"
-if [ ! -f "${PARAMETERS_FILE}" ]; then
-  echo "エラー: パラメータファイル ${PARAMETERS_FILE} が見つかりません。"
+
+if [ ! -f "${PARAMETERS_TEMPLATE}" ]; then
+  echo "エラー: パラメータテンプレートファイル ${PARAMETERS_TEMPLATE} が見つかりません。"
   exit 1
 fi
 
+# テンプレートからパラメータファイルを生成
+echo "パラメータファイルを生成しています..."
+cp "${PARAMETERS_TEMPLATE}" "${PARAMETERS_FILE}"
+
 # AWSアカウントIDの置換
 sed -i.bak "s/\${AWS_ACCOUNT_ID}/${ACCOUNT_ID}/g" "${PARAMETERS_FILE}"
+
+echo "AWSアカウントID(${ACCOUNT_ID})でパラメータを設定しました。"
 
 # スタックのデプロイ
 echo "${ENVIRONMENT}環境のスタックを${ACTION}しています..."
@@ -107,6 +115,34 @@ case ${ACTION} in
     ;;
   
   update)
+    # スタックの状態を確認
+    STACK_STATUS=$(aws cloudformation describe-stacks --stack-name ${STACK_NAME} --query "Stacks[0].StackStatus" --output text 2>/dev/null || echo "DOES_NOT_EXIST")
+    
+    # スタックがROLLBACK_COMPLETEまたはUPDATE_ROLLBACK_FAILED状態の場合、リカバリーを試みる
+    if [ "${STACK_STATUS}" = "ROLLBACK_COMPLETE" ] || [ "${STACK_STATUS}" = "UPDATE_ROLLBACK_FAILED" ]; then
+      echo "スタックは ${STACK_STATUS} 状態です。リカバリーを試みています..."
+      aws cloudformation continue-update-rollback --stack-name ${STACK_NAME} --region ${REGION}
+      
+      # リカバリーの完了を待機
+      echo "スタックのリカバリーを待機しています..."
+      aws cloudformation wait stack-update-complete --stack-name ${STACK_NAME} --region ${REGION}
+      
+      # リカバリー後の状態を確認
+      NEW_STATUS=$(aws cloudformation describe-stacks --stack-name ${STACK_NAME} --query "Stacks[0].StackStatus" --output text)
+      echo "リカバリー後のスタック状態: ${NEW_STATUS}"
+      
+      if [[ "${NEW_STATUS}" == *"FAILED"* || "${NEW_STATUS}" == "ROLLBACK_COMPLETE" ]]; then
+        echo "スタックのリカバリーが完了しませんでした。手動での対応が必要かもしれません。"
+        read -p "それでも更新を続行しますか？ (y/n): " CONTINUE
+        if [ "${CONTINUE}" != "y" ]; then
+          echo "スタックの更新を中止しました。"
+          exit 1
+        fi
+      else
+        echo "スタックが正常な状態に回復しました。更新を続行します。"
+      fi
+    fi
+    
     # 変更セットの作成（実行前にプレビュー用）
     CHANGE_SET_NAME="${STACK_NAME}-change-set-$(date +%Y%m%d%H%M%S)"
     
@@ -204,9 +240,15 @@ case ${ACTION} in
     ;;
 esac
 
-# パラメータファイルを元に戻す
+# 一時ファイルのクリーンアップ
 if [ -f "${PARAMETERS_FILE}.bak" ]; then
-  mv "${PARAMETERS_FILE}.bak" "${PARAMETERS_FILE}"
+  rm "${PARAMETERS_FILE}.bak"
+fi
+
+# 生成したパラメータファイルを削除（セキュリティのため）
+if [ -f "${PARAMETERS_FILE}" ]; then
+  rm "${PARAMETERS_FILE}"
+  echo "セキュリティのためパラメータファイルを削除しました。"
 fi
 
 echo "操作が完了しました。"

@@ -5,7 +5,7 @@
   },
   {
     "ParameterKey": "ArtifactBucket",
-    "ParameterValue": "ecsforgate-cfn-templates-897167645238"
+    "ParameterValue": "ecsforgate-cfn-templates-${AWS_ACCOUNT_ID}"
   },
   {
     "ParameterKey": "VpcCidr",
