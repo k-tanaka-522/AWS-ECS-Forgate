@@ -310,6 +310,42 @@ aws ecr describe-images --repository-name ecsforgate-base
 
 3. 出力に `"imageTags": [ "base-2025-Q2-frozen" ]` が含まれていれば成功です。
 
+### 【手順4：Windows PowerShell環境で実行】
+#### 2.4 ローカルイメージの削除（オプション）
+
+プッシュが成功したら、ディスク容量を節約するためにローカルのDockerイメージを削除することができます。
+
+1. Windows PowerShellに戻ります
+
+2. 以下のコマンドを実行して、プッシュ済みのイメージをローカルから削除します：
+
+```powershell
+# 環境変数を再設定
+$AWS_ACCOUNT_ID = aws sts get-caller-identity --query Account --output text
+$AWS_REGION = aws configure get region
+$REPOSITORY_URI = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/ecsforgate-base"
+$IMAGE_TAG = "base-2025-Q2-frozen"
+
+# ローカルイメージの確認
+Write-Host "削除前のイメージを確認します："
+docker images | Select-String ecsforgate-base
+
+# イメージの削除
+Write-Host "ローカルイメージを削除します..."
+docker rmi "${REPOSITORY_URI}:${IMAGE_TAG}"
+
+# 削除後の確認
+Write-Host "削除後のイメージを確認します："
+docker images | Select-String ecsforgate-base
+```
+
+3. `Untagged: ...` および `Deleted: ...` という出力が表示されれば、イメージの削除は成功です。
+
+【確認ポイント】
+- プッシュが完了し、ECRに正常にイメージが登録されていることを確認してから削除してください
+- 今後もローカルでイメージを使用する予定がある場合は、削除しないでください
+- 削除するのはタグ付きイメージのみで、ベースとなるubuntuイメージは残しておくことで、次回のビルドを高速化できます
+
 #### トラブルシューティング
 
 **問題: ECRログインに失敗する場合**
