@@ -1,0 +1,123 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CareApp - Shared Network Resources (VPC, Subnets, IGW)'
+
+Parameters:
+  Environment:
+    Type: String
+    Description: Environment name
+
+  SharedVPCCIDR:
+    Type: String
+    Description: CIDR block for Shared VPC
+
+  PublicSubnet1CIDR:
+    Type: String
+    Description: CIDR block for Public Subnet 1 (AZ-a)
+
+Resources:
+  # ========================================
+  # VPC
+  # ========================================
+  SharedVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref SharedVPCCIDR
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub CareApp-${Environment}-VPC-Shared
+        - Key: Project
+          Value: CareApp
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ========================================
+  # Internet Gateway
+  # ========================================
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub CareApp-${Environment}-IGW-Shared
+        - Key: Project
+          Value: CareApp
+        - Key: Environment
+          Value: !Ref Environment
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref SharedVPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # ========================================
+  # Subnets
+  # ========================================
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref SharedVPC
+      CidrBlock: !Ref PublicSubnet1CIDR
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub CareApp-${Environment}-Subnet-Shared-Public-1a
+        - Key: Project
+          Value: CareApp
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ========================================
+  # Route Tables
+  # ========================================
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref SharedVPC
+      Tags:
+        - Key: Name
+          Value: !Sub CareApp-${Environment}-RT-Shared-Public
+        - Key: Project
+          Value: CareApp
+        - Key: Environment
+          Value: !Ref Environment
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+Outputs:
+  SharedVPCID:
+    Description: Shared VPC ID
+    Value: !Ref SharedVPC
+
+  SharedVPCCIDR:
+    Description: Shared VPC CIDR
+    Value: !Ref SharedVPCCIDR
+
+  InternetGatewayID:
+    Description: Internet Gateway ID
+    Value: !Ref InternetGateway
+
+  PublicSubnet1ID:
+    Description: Public Subnet 1 ID
+    Value: !Ref PublicSubnet1
+
+  PublicRouteTableID:
+    Description: Public Route Table ID
+    Value: !Ref PublicRouteTable

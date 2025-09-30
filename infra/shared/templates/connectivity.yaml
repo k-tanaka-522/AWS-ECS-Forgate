@@ -1,0 +1,216 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CareApp - Shared Connectivity Resources (Transit Gateway, Client VPN)'
+
+Parameters:
+  Environment:
+    Type: String
+    Description: Environment name
+
+  SharedVPCID:
+    Type: String
+    Description: Shared VPC ID
+
+  SharedVPCCIDR:
+    Type: String
+    Description: Shared VPC CIDR
+
+  PublicSubnet1ID:
+    Type: String
+    Description: Public Subnet 1 ID
+
+  PublicRouteTableID:
+    Type: String
+    Description: Public Route Table ID
+
+  AppVPCCIDR:
+    Type: String
+    Description: App VPC CIDR (for routing)
+
+  ClientVPNServerCertificateArn:
+    Type: String
+    Description: ACM Certificate ARN for Client VPN Server
+    Default: ''
+
+  ClientVPNClientCertificateArn:
+    Type: String
+    Description: ACM Certificate ARN for Client VPN Client
+    Default: ''
+
+  ClientVPNCIDR:
+    Type: String
+    Description: CIDR block for Client VPN clients
+
+Conditions:
+  HasClientVPNCertificates: !And
+    - !Not [!Equals [!Ref ClientVPNServerCertificateArn, '']]
+    - !Not [!Equals [!Ref ClientVPNClientCertificateArn, '']]
+
+Resources:
+  # ========================================
+  # Transit Gateway
+  # ========================================
+  TransitGateway:
+    Type: AWS::EC2::TransitGateway
+    Properties:
+      Description: !Sub CareApp ${Environment} Transit Gateway
+      DefaultRouteTableAssociation: enable
+      DefaultRouteTablePropagation: enable
+      DnsSupport: enable
+      VpnEcmpSupport: enable
+      Tags:
+        - Key: Name
+          Value: !Sub CareApp-${Environment}-TGW
+        - Key: Project
+          Value: CareApp
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Transit Gateway Attachment for Shared VPC
+  TransitGatewayAttachmentShared:
+    Type: AWS::EC2::TransitGatewayAttachment
+    Properties:
+      TransitGatewayId: !Ref TransitGateway
+      VpcId: !Ref SharedVPCID
+      SubnetIds:
+        - !Ref PublicSubnet1ID
+      Tags:
+        - Key: Name
+          Value: !Sub CareApp-${Environment}-TGW-Attachment-Shared
+        - Key: Project
+          Value: CareApp
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Route to App VPC via Transit Gateway
+  RouteToAppVPC:
+    Type: AWS::EC2::Route
+    DependsOn: TransitGatewayAttachmentShared
+    Properties:
+      RouteTableId: !Ref PublicRouteTableID
+      DestinationCidrBlock: !Ref AppVPCCIDR
+      TransitGatewayId: !Ref TransitGateway
+
+  # ========================================
+  # Client VPN Endpoint
+  # ========================================
+  ClientVPNLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: HasClientVPNCertificates
+    Properties:
+      LogGroupName: !Sub /aws/clientvpn/${Environment}
+      RetentionInDays: 30
+
+  ClientVPNLogStream:
+    Type: AWS::Logs::LogStream
+    Condition: HasClientVPNCertificates
+    Properties:
+      LogGroupName: !Ref ClientVPNLogGroup
+      LogStreamName: connection-logs
+
+  ClientVPNEndpoint:
+    Type: AWS::EC2::ClientVpnEndpoint
+    Condition: HasClientVPNCertificates
+    Properties:
+      Description: !Sub CareApp ${Environment} Client VPN
+      ClientCidrBlock: !Ref ClientVPNCIDR
+      ServerCertificateArn: !Ref ClientVPNServerCertificateArn
+      AuthenticationOptions:
+        - Type: certificate-authentication
+          MutualAuthentication:
+            ClientRootCertificateChainArn: !Ref ClientVPNClientCertificateArn
+      ConnectionLogOptions:
+        Enabled: true
+        CloudwatchLogGroup: !Ref ClientVPNLogGroup
+        CloudwatchLogStream: !GetAtt ClientVPNLogStream.Arn
+      DnsServers:
+        - !Sub ${SharedVPCCIDR}2  # VPC DNS (e.g., 10.0.0.2)
+      SplitTunnel: true
+      VpnPort: 443
+      TransportProtocol: udp
+      TagSpecifications:
+        - ResourceType: client-vpn-endpoint
+          Tags:
+            - Key: Name
+              Value: !Sub CareApp-${Environment}-ClientVPN
+            - Key: Project
+              Value: CareApp
+            - Key: Environment
+              Value: !Ref Environment
+
+  ClientVPNTargetNetworkAssociation:
+    Type: AWS::EC2::ClientVpnTargetNetworkAssociation
+    Condition: HasClientVPNCertificates
+    Properties:
+      ClientVpnEndpointId: !Ref ClientVPNEndpoint
+      SubnetId: !Ref PublicSubnet1ID
+
+  ClientVPNAuthorizationRule:
+    Type: AWS::EC2::ClientVpnAuthorizationRule
+    Condition: HasClientVPNCertificates
+    Properties:
+      ClientVpnEndpointId: !Ref ClientVPNEndpoint
+      TargetNetworkCidr: !Ref AppVPCCIDR
+      AuthorizeAllGroups: true
+      Description: Allow access to App VPC
+
+  ClientVPNRouteToAppVPC:
+    Type: AWS::EC2::ClientVpnRoute
+    Condition: HasClientVPNCertificates
+    DependsOn: ClientVPNTargetNetworkAssociation
+    Properties:
+      ClientVpnEndpointId: !Ref ClientVPNEndpoint
+      DestinationCidrBlock: !Ref AppVPCCIDR
+      TargetVpcSubnetId: !Ref PublicSubnet1ID
+      Description: Route to App VPC
+
+  # ========================================
+  # Security Group for VPN Traffic
+  # ========================================
+  ClientVPNSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: HasClientVPNCertificates
+    Properties:
+      GroupDescription: Security group for Client VPN connections
+      VpcId: !Ref SharedVPCID
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: Client VPN HTTPS
+        - IpProtocol: udp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: Client VPN UDP
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: Allow all outbound
+      Tags:
+        - Key: Name
+          Value: !Sub CareApp-${Environment}-SG-ClientVPN
+        - Key: Project
+          Value: CareApp
+        - Key: Environment
+          Value: !Ref Environment
+
+Outputs:
+  TransitGatewayID:
+    Description: Transit Gateway ID
+    Value: !Ref TransitGateway
+
+  ClientVPNEndpointID:
+    Description: Client VPN Endpoint ID
+    Condition: HasClientVPNCertificates
+    Value: !Ref ClientVPNEndpoint
+
+  ClientVPNDNSName:
+    Description: Client VPN DNS Name
+    Condition: HasClientVPNCertificates
+    Value: !GetAtt ClientVPNEndpoint.DnsName
+
+  ClientVPNSecurityGroupID:
+    Description: Client VPN Security Group ID
+    Condition: HasClientVPNCertificates
+    Value: !Ref ClientVPNSecurityGroup
