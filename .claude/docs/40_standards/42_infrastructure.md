@@ -58,23 +58,63 @@ project-root/
 └── README.md
 ```
 
-### 2.2 CloudFormation の標準構造
+### 2.2 CloudFormation の標準構造（ネストスタック）
+
+**推奨構造（実運用フィードバック反映）：**
 
 ```
 project-root/
-├── templates/                  # CloudFormationテンプレート
-│   ├── vpc.yaml
-│   ├── ec2.yaml
-│   ├── rds.yaml
-│   └── main.yaml              # ネストスタックのルート
-│
-├── parameters/                 # パラメーターファイル
-│   ├── dev.json
-│   ├── stg.json
-│   └── prod.json
+├── infra/
+│   ├── shared/                       # 共有系インフラ（VPC, TGW等）
+│   │   ├── stack.yaml                # 親スタック（エントリーポイント）
+│   │   ├── nested/                   # ネストスタックの子テンプレート
+│   │   │   ├── network.yaml          # VPC, IGW, Subnet
+│   │   │   └── connectivity.yaml     # TGW, Client VPN
+│   │   ├── parameters-dev.json       # 環境別パラメータ
+│   │   ├── parameters-stg.json
+│   │   ├── parameters-prod.json
+│   │   └── deploy.sh                 # デプロイスクリプト
+│   │
+│   ├── application/                  # アプリケーション系インフラ
+│   │   ├── stack.yaml
+│   │   ├── nested/
+│   │   │   ├── alb.yaml
+│   │   │   ├── ecs.yaml
+│   │   │   └── rds.yaml
+│   │   ├── parameters-dev.json
+│   │   └── deploy.sh
+│   │
+│   └── monitoring/                   # 監視系インフラ
+│       ├── stack.yaml
+│       ├── nested/
+│       │   ├── cloudwatch.yaml
+│       │   └── sns.yaml
+│       ├── parameters-dev.json
+│       └── deploy.sh
 │
 └── README.md
 ```
+
+**命名規則：**
+- **親スタック**: `stack.yaml`（エントリーポイントであることが明確）
+- **子テンプレート格納ディレクトリ**: `nested/`（ネストスタックであることが明確）
+- **子テンプレート**: 機能単位で命名（`network.yaml`, `connectivity.yaml`, `alb.yaml`等）
+- **パラメータファイル**: `parameters-{env}.json`
+
+**ディレクトリ分割方針：**
+- `shared/`: 複数プロジェクト・アプリで共有するインフラ（VPC, TGW等）
+- `application/`: アプリケーション固有のインフラ（ALB, ECS, RDS等）
+- `monitoring/`: 監視・ログ系（CloudWatch, SNS等）
+
+**重要：デプロイスクリプトの提供**
+
+各ディレクトリに`deploy.sh`（Mac/Linux）と`deploy.bat`（Windows）を配置。
+スクリプトが以下を自動実行：
+1. S3バケット作成（存在しない場合）
+2. ネストテンプレートをS3にアップロード
+3. 親スタックをデプロイ
+
+→ ユーザーはS3バケットの事前準備不要で、`./deploy.sh dev`のみでデプロイ可能。
 
 ---
 
@@ -186,10 +226,12 @@ module "vpc" {
 
 ### 3.2 CloudFormation ネストスタック
 
+**親スタック（stack.yaml）：**
+
 ```yaml
-# templates/main.yaml
+# infra/shared/stack.yaml
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'メインスタック - ネストスタックを統合'
+Description: '共有ネットワークインフラ - 親スタック'
 
 Parameters:
   Environment:
@@ -197,23 +239,145 @@ Parameters:
     AllowedValues: [dev, stg, prod]
     Description: 環境名
 
+  ProjectName:
+    Type: String
+    Description: プロジェクト名
+
+  TemplatesBucketName:
+    Type: String
+    Description: ネストテンプレート格納用S3バケット名
+
 Resources:
-  VPCStack:
+  # ネットワークスタック（VPC, Subnet, IGW）
+  NetworkStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: !Sub 'https://s3.amazonaws.com/${S3Bucket}/templates/vpc.yaml'
+      TemplateURL: !Sub 'https://${TemplatesBucketName}.s3.${AWS::Region}.amazonaws.com/shared/nested/network.yaml'
       Parameters:
         Environment: !Ref Environment
+        ProjectName: !Ref ProjectName
         VpcCIDR: !FindInMap [EnvironmentMap, !Ref Environment, VpcCIDR]
 
-  EC2Stack:
+  # 接続性スタック（TGW, Client VPN）
+  ConnectivityStack:
     Type: AWS::CloudFormation::Stack
-    DependsOn: VPCStack
+    DependsOn: NetworkStack
     Properties:
-      TemplateURL: !Sub 'https://s3.amazonaws.com/${S3Bucket}/templates/ec2.yaml'
+      TemplateURL: !Sub 'https://${TemplatesBucketName}.s3.${AWS::Region}.amazonaws.com/shared/nested/connectivity.yaml'
       Parameters:
         Environment: !Ref Environment
-        VpcId: !GetAtt VPCStack.Outputs.VpcId
+        ProjectName: !Ref ProjectName
+        VpcId: !GetAtt NetworkStack.Outputs.VpcId
+        PrivateSubnetIds: !GetAtt NetworkStack.Outputs.PrivateSubnetIds
+
+Mappings:
+  EnvironmentMap:
+    dev:
+      VpcCIDR: 10.0.0.0/16
+    stg:
+      VpcCIDR: 10.1.0.0/16
+    prod:
+      VpcCIDR: 10.2.0.0/16
+
+Outputs:
+  VpcId:
+    Value: !GetAtt NetworkStack.Outputs.VpcId
+    Export:
+      Name: !Sub '${ProjectName}-${Environment}-VpcId'
+```
+
+**子テンプレート（network.yaml）：**
+
+```yaml
+# infra/shared/nested/network.yaml
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'VPC・サブネット・IGW'
+
+Parameters:
+  Environment:
+    Type: String
+  ProjectName:
+    Type: String
+  VpcCIDR:
+    Type: String
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCIDR
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-vpc'
+        - Key: Environment
+          Value: !Ref Environment
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-igw'
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+Outputs:
+  VpcId:
+    Value: !Ref VPC
+  PrivateSubnetIds:
+    Value: !Join [',', [!Ref PrivateSubnet1, !Ref PrivateSubnet2]]
+```
+
+**デプロイスクリプト（deploy.sh）：**
+
+```bash
+#!/bin/bash
+# infra/shared/deploy.sh
+
+set -e
+
+ENVIRONMENT=$1
+PROJECT_NAME="myproject"  # プロジェクト名
+BUCKET_NAME="${PROJECT_NAME}-cfn-templates-${ENVIRONMENT}"
+
+if [ -z "$ENVIRONMENT" ]; then
+    echo "Usage: ./deploy.sh <environment>"
+    echo "Example: ./deploy.sh dev"
+    exit 1
+fi
+
+echo "=== CloudFormation Nested Stack Deployment ==="
+echo "Project: ${PROJECT_NAME}"
+echo "Environment: ${ENVIRONMENT}"
+echo ""
+
+# 1. S3バケット作成（存在しない場合）
+echo "[1/3] Checking S3 bucket..."
+aws s3 mb "s3://${BUCKET_NAME}" 2>/dev/null || echo "  Bucket already exists"
+
+# 2. ネストテンプレートをS3にアップロード
+echo "[2/3] Uploading nested templates to S3..."
+aws s3 cp nested/network.yaml "s3://${BUCKET_NAME}/shared/nested/"
+aws s3 cp nested/connectivity.yaml "s3://${BUCKET_NAME}/shared/nested/"
+echo "  Nested templates uploaded"
+
+# 3. 親スタックをデプロイ
+echo "[3/3] Deploying CloudFormation stack..."
+aws cloudformation deploy \
+  --stack-name "${PROJECT_NAME}-${ENVIRONMENT}-SharedNetwork" \
+  --template-file stack.yaml \
+  --parameter-overrides file://parameters-${ENVIRONMENT}.json \
+  --capabilities CAPABILITY_IAM \
+  --no-fail-on-empty-changeset
+
+echo ""
+echo "=== Deployment Complete ==="
 ```
 
 ---

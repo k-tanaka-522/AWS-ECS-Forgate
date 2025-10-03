@@ -109,35 +109,63 @@ rds.tf
 **原則：**
 - dev/stg/prodの差分を見やすく整理
 - 環境変数・パラメーターファイルで管理
-- シークレット情報は分離
+- **シークレット情報は必ず分離**（ハードコード禁止）
 
 **ディレクトリ構造例：**
 ```
 environments/
 ├── dev/
-│   ├── terraform.tfvars
+│   ├── terraform.tfvars          # 非機密パラメータ（Git管理OK）
+│   ├── secrets.tfvars            # 機密パラメータ（.gitignoreで除外）
 │   └── backend.tf
 ├── stg/
 │   ├── terraform.tfvars
+│   ├── secrets.tfvars            # .gitignoreで除外
 │   └── backend.tf
 └── prod/
     ├── terraform.tfvars
+    ├── secrets.tfvars            # .gitignoreで除外
     └── backend.tf
+
+.gitignore                         # secrets.tfvars を必ず除外
 ```
 
 **パラメーターファイル例：**
+
 ```hcl
-# environments/dev/terraform.tfvars
+# environments/dev/terraform.tfvars（非機密）
 environment = "dev"
 instance_type = "t3.micro"
 db_instance_class = "db.t3.micro"
+vpc_cidr = "10.0.0.0/16"
 ```
 
 ```hcl
-# environments/prod/terraform.tfvars
+# environments/dev/secrets.tfvars（機密）← Git管理しない
+db_password = "DevPassword123!"
+api_key = "dev-api-key-xxxxxxxxxx"
+```
+
+```hcl
+# environments/prod/terraform.tfvars（非機密）
 environment = "prod"
 instance_type = "t3.large"
 db_instance_class = "db.t3.large"
+vpc_cidr = "10.2.0.0/16"
+```
+
+```hcl
+# environments/prod/secrets.tfvars（機密）← Git管理しない
+db_password = "ProdSecurePassword456!"
+api_key = "prod-api-key-yyyyyyyyyy"
+```
+
+**重要：.gitignore に必ず追加**
+```
+# .gitignore
+**/secrets.tfvars
+**/*.env
+**/.env*
 ```
 
 ### 3.3 直感的な構成

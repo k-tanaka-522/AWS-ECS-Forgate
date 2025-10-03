@@ -4,23 +4,11 @@
     "ParameterValue": "POC"
   },
   {
-    "ParameterKey": "SharedVPCCIDR",
+    "ParameterKey": "SharedVpcCidr",
     "ParameterValue": "10.0.0.0/16"
   },
   {
-    "ParameterKey": "PublicSubnet1CIDR",
-    "ParameterValue": "10.0.1.0/24"
-  },
-  {
-    "ParameterKey": "ClientVPNServerCertificateArn",
-    "ParameterValue": ""
-  },
-  {
-    "ParameterKey": "ClientVPNClientCertificateArn",
-    "ParameterValue": ""
-  },
-  {
-    "ParameterKey": "ClientVPNCIDR",
-    "ParameterValue": "10.100.0.0/22"
+    "ParameterKey": "ClientVpnCidr",
+    "ParameterValue": "10.255.0.0/16"
   }
 ]

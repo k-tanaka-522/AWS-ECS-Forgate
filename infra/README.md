@@ -2,59 +2,63 @@
 
 ## 概要
 
-このディレクトリには、介護保険申請管理システムのAWSインフラをデプロイするためのCloudFormationテンプレートが含まれています。
+このディレクトリには、介護保険申請管理システム（CareApp）のAWSインフラをデプロイするためのCloudFormationテンプレートが含まれています。
+
+## アーキテクチャ概要
+
+4つの独立したスタックで構成：
+
+1. **CareApp-{Env}-SharedNetwork**: 共有系VPC、Transit Gateway、Client VPN
+2. **CareApp-{Env}-AppNetwork**: アプリ系VPC、ALB、セキュリティグループ
+3. **CareApp-{Env}-Database**: RDS PostgreSQL、Secrets Manager
+4. **CareApp-{Env}-AppPlatform**: ECS Cluster、ECR、Cognito、S3、IAMロール
+
+```mermaid
+graph TD
+    SharedNetwork[共有系ネットワーク<br/>Shared VPC + TGW + VPN]
+    AppNetwork[アプリ系ネットワーク<br/>App VPC + ALB + SG]
+    Database[データベース<br/>RDS PostgreSQL]
+    AppPlatform[アプリ基盤<br/>ECS + Cognito + S3]
+
+    SharedNetwork -->|TGW ID| AppNetwork
+    AppNetwork -->|VPC/Subnet/SG IDs| Database
+    AppNetwork -->|VPC/Subnet/ALB| AppPlatform
+    Database -->|RDS Endpoint| AppPlatform
+```
 
 ## 技術方針
 
 ### スタック分割方針
 
-**Cross-Stack References** を採用し、以下の4つの独立したスタックに分割：
+**Cross-Stack References** を採用し、以下の理由で4スタック分割：
 
-1. **共有系ネットワークスタック**: 共有系VPC、Transit Gateway、Client VPN
-2. **アプリ系ネットワークスタック**: アプリ系VPC、サブネット、ALB、セキュリティグループ
-3. **データベーススタック**: RDS PostgreSQL
-4. **アプリ基盤スタック**: ECS Cluster、ECR、Cognito、S3、IAMロール
+- **独立した管理**: スタックごとに更新・ロールバック可能
+- **責任分離**: ネットワーク、DB、アプリ基盤を分離
+- **段階的構築**: 順次デプロイ可能
+- **再利用性**: 共有VPCは他プロジェクトでも利用可能
 
 ### 命名規則
 
 ```
 スタック名: CareApp-{Environment}-{Component}
   例: CareApp-POC-SharedNetwork
-      CareApp-POC-AppNetwork
-      CareApp-POC-Database
-      CareApp-POC-AppPlatform
+      CareApp-Production-AppNetwork
 
-Export名: CareApp-{Environment}-{Component}-{Resource}
-  例: CareApp-POC-AppNetwork-ECSClusterName
-      CareApp-POC-AppNetwork-ALBTargetGroupArn
+Export名: {StackName}-{ResourceName}
+  例: CareApp-POC-SharedNetwork-TransitGatewayID
+      CareApp-POC-AppNetwork-ALBArn
 
 リソース名: CareApp-{Environment}-{ResourceType}-{Name}
   例: CareApp-POC-VPC-Shared
       CareApp-POC-ECSCluster-Main
 ```
 
-### 責任分解
-
-**インフラチーム（CloudFormation）の責任**:
-- ネットワーク構成（VPC、サブネット、ルーティング）
-- Transit Gateway、Client VPN
-- ECS Cluster（空のクラスター）
-- ALB、Target Group
-- RDS PostgreSQL
-- Cognito User Pool
-- S3バケット、ECRリポジトリ
-- IAMロール、セキュリティグループ
-
-**アプリチーム（GitHub Actions）の責任**:
-- Dockerイメージのビルド、ECRへのpush
-- ECS Task Definition
-- ECS Service（CloudFormationが作成したTarget Groupに紐付け）
-
 ### パラメータ管理
 
-- 環境依存パラメータは `parameters-{environment}.json` で管理
-- シークレット情報（DBパスワード等）はAWS Secrets Managerで管理
-- VPCのCIDR等、環境ごとに異なる値はパラメータ化
+- **環境依存**: `parameters-{env}.json` で管理
+- **シークレット**: AWS Secrets Manager（DB認証情報）
+- **証明書**: ACMでHTTPS証明書を事前発行
+- **VPN証明書**: Client VPN用サーバー/クライアント証明書
 
 ## ディレクトリ構成
 
@@ -69,58 +73,116 @@ infra/
 │   ├── database.yaml                  # RDS PostgreSQL
 │   ├── platform.yaml                  # ECS、Cognito、S3、ECR
 │   └── parameters-poc.json            # POC環境用パラメータ
-└── docs/
-    └── deploy-guide.md                # デプロイ手順書
+└── scripts/
+    ├── deploy-all.sh                  # 全スタック一括デプロイ
+    ├── delete-all.sh                  # 全スタック削除
+    └── validate.sh                    # テンプレート検証
 ```
 
-## デプロイ順序
+## クイックスタート
 
-POC環境のデプロイは以下の順序で実行：
+### 前提条件
+
+1. **AWS CLI設定**: 管理者権限を持つプロファイル
+2. **ACM証明書**: ALB用HTTPS証明書を `ap-northeast-1` に発行
+3. **VPN証明書**: Client VPN用サーバー/クライアント証明書をACMにインポート
+4. **パラメータ設定**: `infra/shared/parameters-poc.json` と `infra/app/parameters-poc.json` を編集
+
+### デプロイ手順
+
+#### 方法1: 一括デプロイスクリプト（推奨）
 
 ```bash
+cd infra/scripts
+
+# dry-run: 変更セットのみ作成
+./deploy-all.sh --dry-run
+
+# 本番実行
+./deploy-all.sh
+```
+
+#### 方法2: 手動デプロイ（スタックごと）
+
+```bash
+cd infra
+
 # 1. 共有系ネットワークスタック
 aws cloudformation create-stack \
   --stack-name CareApp-POC-SharedNetwork \
   --template-body file://shared/network.yaml \
   --parameters file://shared/parameters-poc.json \
-  --capabilities CAPABILITY_IAM
+  --capabilities CAPABILITY_NAMED_IAM \
+  --region ap-northeast-1
 
-# 2. アプリ系ネットワークスタック（共有系完了後）
+# 作成完了を待機
+aws cloudformation wait stack-create-complete \
+  --stack-name CareApp-POC-SharedNetwork \
+  --region ap-northeast-1
+
+# 2. アプリ系ネットワークスタック
 aws cloudformation create-stack \
   --stack-name CareApp-POC-AppNetwork \
   --template-body file://app/network.yaml \
   --parameters file://app/parameters-poc.json \
-  --capabilities CAPABILITY_IAM
+  --capabilities CAPABILITY_NAMED_IAM \
+  --region ap-northeast-1
 
-# 3. データベーススタック（アプリ系ネットワーク完了後）
+aws cloudformation wait stack-create-complete \
+  --stack-name CareApp-POC-AppNetwork \
+  --region ap-northeast-1
+
+# 3. データベーススタック
 aws cloudformation create-stack \
   --stack-name CareApp-POC-Database \
   --template-body file://app/database.yaml \
   --parameters file://app/parameters-poc.json \
-  --capabilities CAPABILITY_IAM
+  --capabilities CAPABILITY_NAMED_IAM \
+  --region ap-northeast-1
 
-# 4. アプリ基盤スタック（データベース完了後）
+aws cloudformation wait stack-create-complete \
+  --stack-name CareApp-POC-Database \
+  --region ap-northeast-1
+
+# 4. アプリ基盤スタック
 aws cloudformation create-stack \
   --stack-name CareApp-POC-AppPlatform \
   --template-body file://app/platform.yaml \
   --parameters file://app/parameters-poc.json \
-  --capabilities CAPABILITY_IAM
+  --capabilities CAPABILITY_NAMED_IAM \
+  --region ap-northeast-1
+
+aws cloudformation wait stack-create-complete \
+  --stack-name CareApp-POC-AppPlatform \
+  --region ap-northeast-1
 ```
 
-## スタック間の依存関係
+### デプロイ後の確認
 
-```mermaid
-graph TD
-    SharedNetwork[共有系ネットワーク<br/>CareApp-POC-SharedNetwork]
-    AppNetwork[アプリ系ネットワーク<br/>CareApp-POC-AppNetwork]
-    Database[データベース<br/>CareApp-POC-Database]
-    AppPlatform[アプリ基盤<br/>CareApp-POC-AppPlatform]
+```bash
+# ALB DNS名
+aws cloudformation describe-stacks \
+  --stack-name CareApp-POC-AppNetwork \
+  --query 'Stacks[0].Outputs[?OutputKey==`ALBDNSName`].OutputValue' \
+  --output text \
+  --region ap-northeast-1
 
-    SharedNetwork -->|TGW ID| AppNetwork
-    AppNetwork -->|VPC ID, Subnet IDs, SG IDs| Database
-    AppNetwork -->|VPC ID, Subnet IDs, ALB ARN| AppPlatform
-    Database -->|RDS Endpoint| AppPlatform
+# RDS Endpoint
+aws cloudformation describe-stacks \
+  --stack-name CareApp-POC-Database \
+  --query 'Stacks[0].Outputs[?OutputKey==`DBEndpoint`].OutputValue' \
+  --output text \
+  --region ap-northeast-1
+
+# Cognito User Pool ID
+aws cloudformation describe-stacks \
+  --stack-name CareApp-POC-AppPlatform \
+  --query 'Stacks[0].Outputs[?OutputKey==`CognitoUserPoolId`].OutputValue' \
+  --output text \
+  --region ap-northeast-1
 ```
+
+## スタック間依存関係
 
 ## Exports一覧
 
@@ -176,83 +238,171 @@ graph TD
 | バックアップ | 7日 | 30日 |
 | DR | なし | 大阪リージョンコピー |
 
-## ベストプラクティス
+## 管理・運用
 
-### 1. 変更セット（Change Sets）の利用
+### テンプレート検証
 
-本番環境への適用前に、必ず変更セットを作成して差分を確認：
+```bash
+cd infra/scripts
+./validate.sh
+```
+
+### スタック削除（全削除）
+
+```bash
+cd infra/scripts
+./delete-all.sh  # 確認プロンプトあり
+```
+
+### 個別スタック削除（依存関係の逆順）
+
+```bash
+# 4. アプリ基盤
+aws cloudformation delete-stack --stack-name CareApp-POC-AppPlatform --region ap-northeast-1
+aws cloudformation wait stack-delete-complete --stack-name CareApp-POC-AppPlatform --region ap-northeast-1
+
+# 3. データベース
+aws cloudformation delete-stack --stack-name CareApp-POC-Database --region ap-northeast-1
+aws cloudformation wait stack-delete-complete --stack-name CareApp-POC-Database --region ap-northeast-1
+
+# 2. アプリ系ネットワーク
+aws cloudformation delete-stack --stack-name CareApp-POC-AppNetwork --region ap-northeast-1
+aws cloudformation wait stack-delete-complete --stack-name CareApp-POC-AppNetwork --region ap-northeast-1
+
+# 1. 共有系ネットワーク
+aws cloudformation delete-stack --stack-name CareApp-POC-SharedNetwork --region ap-northeast-1
+aws cloudformation wait stack-delete-complete --stack-name CareApp-POC-SharedNetwork --region ap-northeast-1
+```
+
+### 変更セット作成（本番環境推奨）
 
 ```bash
 aws cloudformation create-change-set \
   --stack-name CareApp-POC-AppNetwork \
-  --change-set-name update-20250930 \
+  --change-set-name update-$(date +%Y%m%d-%H%M%S) \
   --template-body file://app/network.yaml \
-  --parameters file://app/parameters-poc.json
+  --parameters file://app/parameters-poc.json \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --region ap-northeast-1
+
+# 変更セット確認
+aws cloudformation describe-change-set \
+  --stack-name CareApp-POC-AppNetwork \
+  --change-set-name update-YYYYMMDD-HHMMSS \
+  --region ap-northeast-1
+
+# 変更セット実行
+aws cloudformation execute-change-set \
+  --stack-name CareApp-POC-AppNetwork \
+  --change-set-name update-YYYYMMDD-HHMMSS \
+  --region ap-northeast-1
 ```
-
-### 2. ドリフト検出
-
-定期的にドリフト検出を実行し、手動変更を確認：
-
-```bash
-aws cloudformation detect-stack-drift \
-  --stack-name CareApp-POC-AppNetwork
-```
-
-### 3. タグ戦略
-
-すべてのリソースに以下のタグを付与：
-- `Project`: CareApp
-- `Environment`: POC/Production
-- `ManagedBy`: CloudFormation
-- `CostCenter`: （コストセンター）
-
-### 4. セキュリティ
-
-- DBパスワード等のシークレットはSecrets Managerで管理
-- IAMロールは最小権限の原則に従う
-- セキュリティグループは必要最小限のポートのみ開放
-
-### 5. コスト管理
-
-- POC環境は不要時に停止（RDS停止、ECS Desired Count 0）
-- タグベースのコスト配分を活用
 
 ## トラブルシューティング
 
-### スタック作成失敗時
+### スタック作成失敗
 
 ```bash
 # エラー詳細確認
 aws cloudformation describe-stack-events \
   --stack-name CareApp-POC-AppNetwork \
-  --max-items 20
+  --max-items 20 \
+  --region ap-northeast-1
 
-# ロールバック
+# 失敗時は自動ロールバック（DELETE_FAILED状態の場合は手動削除）
 aws cloudformation delete-stack \
-  --stack-name CareApp-POC-AppNetwork
+  --stack-name CareApp-POC-AppNetwork \
+  --region ap-northeast-1
 ```
 
-### スタック更新失敗時
+### よくあるエラー
+
+| エラー | 原因 | 対処 |
+|--------|------|------|
+| `Export ... already exists` | 同名Exportが存在 | 既存スタック削除 or Export名変更 |
+| `No export named ...` | 依存スタック未作成 | 依存スタックを先にデプロイ |
+| `Certificate not found` | ACM証明書未発行 | パラメータファイルのARN確認 |
+| `Insufficient permissions` | IAM権限不足 | AdministratorAccess権限確認 |
+| `VPN endpoint limit exceeded` | VPNエンドポイント上限 | 既存VPNを削除 |
+
+### スタック更新失敗（UPDATE_ROLLBACK_COMPLETE）
 
 ```bash
-# 変更セットの確認
-aws cloudformation describe-change-set \
+# 現在の状態確認
+aws cloudformation describe-stacks \
   --stack-name CareApp-POC-AppNetwork \
-  --change-set-name update-20250930
+  --region ap-northeast-1
 
-# ロールバック（前のバージョンに戻す）
-aws cloudformation cancel-update-stack \
-  --stack-name CareApp-POC-AppNetwork
+# 再度更新を試みる（変更セット推奨）
+aws cloudformation create-change-set \
+  --stack-name CareApp-POC-AppNetwork \
+  --change-set-name fix-$(date +%Y%m%d-%H%M%S) \
+  --template-body file://app/network.yaml \
+  --parameters file://app/parameters-poc.json \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --region ap-northeast-1
 ```
+
+### ドリフト検出（手動変更の確認）
+
+```bash
+# ドリフト検出開始
+aws cloudformation detect-stack-drift \
+  --stack-name CareApp-POC-AppNetwork \
+  --region ap-northeast-1
+
+# 結果確認
+aws cloudformation describe-stack-resource-drifts \
+  --stack-name CareApp-POC-AppNetwork \
+  --region ap-northeast-1
+```
+
+## コスト試算
+
+### POC環境（月額概算）
+
+| リソース | スペック | 月額（JPY） |
+|----------|----------|-------------|
+| RDS PostgreSQL | db.t3.micro, Single-AZ | ¥2,500 |
+| Client VPN | 1エンドポイント, 5接続 | ¥5,000 |
+| Transit Gateway | 1TGW, 少量通信 | ¥4,000 |
+| ALB | 少量通信 | ¥2,500 |
+| NAT Gateway | 1台 | ¥4,000 |
+| その他（S3, ECR等） | - | ¥1,000 |
+| **合計** | - | **約¥19,000** |
+
+### 本番環境（月額概算）
+
+| リソース | スペック | 月額（JPY） |
+|----------|----------|-------------|
+| RDS PostgreSQL | db.m5.large, Multi-AZ | ¥45,000 |
+| Direct Connect | 1Gbps専用線 | ¥30,000 |
+| Transit Gateway | 1TGW, 中量通信 | ¥8,000 |
+| ALB | 中量通信 | ¥5,000 |
+| NAT Gateway | 2台（Multi-AZ） | ¥8,000 |
+| WAF | ALB用 | ¥10,000 |
+| その他（S3, ECR, CloudWatch等） | - | ¥5,000 |
+| **合計** | - | **約¥111,000** |
+
+## セキュリティベストプラクティス
+
+- ✅ DB認証情報はSecrets Managerで管理（自動生成32文字）
+- ✅ ALBはHTTPS必須（HTTP→HTTPSリダイレクト）
+- ✅ セキュリティグループは最小権限の原則
+- ✅ RDSはプライベートサブネットに配置
+- ✅ VPC Flow Logsで通信監視
+- ✅ IAMロールは最小権限（ECS Task用）
+- ⚠️ POC環境ではRDS暗号化無効（本番では有効化）
 
 ## 参考リンク
 
 - [AWS CloudFormation ベストプラクティス](https://docs.aws.amazon.com/ja_jp/AWSCloudFormation/latest/UserGuide/best-practices.html)
 - [クロススタック参照](https://docs.aws.amazon.com/ja_jp/AWSCloudFormation/latest/UserGuide/walkthrough-crossstackref.html)
-- [AWS リソース命名規則](https://docs.aws.amazon.com/ja_jp/general/latest/gr/aws-arns-and-namespaces.html)
+- [プロジェクト設計書](../docs/03_CareApp設計書.md)
+- [インフラ設計規約](../docs/standards/インフラ/)
 
 ---
 
-**作成日**: 2025-09-30
+**最終更新**: 2025-10-03
 **管理者**: インフラチーム
+**バージョン**: 1.0.0

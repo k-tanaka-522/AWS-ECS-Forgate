@@ -1,0 +1,662 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: |
+  CareApp アプリ系ネットワークスタック
+
+  このテンプレートは以下を定義します：
+  - App VPC（10.1.0.0/16）
+  - パブリック/プライベートサブネット
+  - Application Load Balancer
+  - セキュリティグループ（ALB、ECS、RDS）
+  - NAT Gateway、Internet Gateway
+
+  依存スタック:
+  - CareApp-POC-SharedNetwork（Transit Gateway ID参照）
+
+  作成日: 2025-10-03
+  管理者: インフラチーム
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: 環境設定
+        Parameters:
+          - Environment
+          - SharedNetworkStackName
+      - Label:
+          default: ネットワーク設定
+        Parameters:
+          - AppVpcCidr
+          - PublicSubnet1Cidr
+          - PrivateSubnetApp1Cidr
+          - PrivateSubnetDB1Cidr
+
+Parameters:
+  Environment:
+    Type: String
+    Description: 環境名（POC/Production）
+    AllowedValues:
+      - POC
+      - Production
+    Default: POC
+
+  SharedNetworkStackName:
+    Type: String
+    Description: 共有系ネットワークスタック名
+    Default: CareApp-POC-SharedNetwork
+
+  AppVpcCidr:
+    Type: String
+    Description: App VPC CIDR
+    Default: 10.1.0.0/16
+
+  PublicSubnet1Cidr:
+    Type: String
+    Description: Public Subnet CIDR
+    Default: 10.1.0.0/24
+
+  PrivateSubnetApp1Cidr:
+    Type: String
+    Description: Private Subnet (App) CIDR
+    Default: 10.1.1.0/24
+
+  PrivateSubnetDB1Cidr:
+    Type: String
+    Description: Private Subnet (DB) CIDR
+    Default: 10.1.2.0/24
+
+Resources:
+  # ========================================
+  # App VPC
+  # ========================================
+  AppVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref AppVpcCidr
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub CareApp-${Environment}-VPC-App
+        - Key: Project
+          Value: CareApp
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Component
+          Value: AppNetwork
+
+  # ========================================
+  # Internet Gateway
+  # ========================================
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub CareApp-${Environment}-IGW-App
+        - Key: Project
+          Value: CareApp
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    DependsOn:
+      - AppVPC
+      - InternetGateway
+    Properties:
+      VpcId: !Ref AppVPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # ========================================
+  # Subnets
+  # ========================================
+  # Public Subnet（ALB配置）
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref AppVPC
+      CidrBlock: !Ref PublicSubnet1Cidr
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub CareApp-${Environment}-Subnet-Public-1a
+        - Key: Project
+          Value: CareApp
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # Private Subnet（ECS Fargate配置）
+  PrivateSubnetApp1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref AppVPC
+      CidrBlock: !Ref PrivateSubnetApp1Cidr
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub CareApp-${Environment}-Subnet-PrivateApp-1a
+        - Key: Project
+          Value: CareApp
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # Private Subnet（RDS配置）
+  PrivateSubnetDB1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref AppVPC
+      CidrBlock: !Ref PrivateSubnetDB1Cidr
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub CareApp-${Environment}-Subnet-PrivateDB-1a
+        - Key: Project
+          Value: CareApp
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ========================================
+  # NAT Gateway
+  # ========================================
+  # Private SubnetからのインターネットアクセスのためのNAT Gateway
+  NATGatewayEIP:
+    Type: AWS::EC2::EIP
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub CareApp-${Environment}-EIP-NAT
+        - Key: Project
+          Value: CareApp
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  NATGateway:
+    Type: AWS::EC2::NatGateway
+    DependsOn: NATGatewayEIP
+    Properties:
+      AllocationId: !GetAtt NATGatewayEIP.AllocationId
+      SubnetId: !Ref PublicSubnet1
+      Tags:
+        - Key: Name
+          Value: !Sub CareApp-${Environment}-NAT-Public-1a
+        - Key: Project
+          Value: CareApp
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ========================================
+  # Route Tables
+  # ========================================
+  # Public Subnet用ルートテーブル
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref AppVPC
+      Tags:
+        - Key: Name
+          Value: !Sub CareApp-${Environment}-RT-Public
+        - Key: Project
+          Value: CareApp
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # インターネットへのデフォルトルート
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  # Shared VPCへのルート（Transit Gateway経由）
+  PublicRouteToSharedVPC:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 10.0.0.0/16
+      TransitGatewayId:
+        Fn::ImportValue: !Sub ${SharedNetworkStackName}-TransitGatewayID
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  # Private Subnet (App)用ルートテーブル
+  PrivateRouteTableApp:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref AppVPC
+      Tags:
+        - Key: Name
+          Value: !Sub CareApp-${Environment}-RT-PrivateApp
+        - Key: Project
+          Value: CareApp
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # NAT Gateway経由でインターネットへ
+  PrivateRouteApp:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableApp
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NATGateway
+
+  # Shared VPCへのルート
+  PrivateRouteAppToSharedVPC:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableApp
+      DestinationCidrBlock: 10.0.0.0/16
+      TransitGatewayId:
+        Fn::ImportValue: !Sub ${SharedNetworkStackName}-TransitGatewayID
+
+  PrivateSubnetApp1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetApp1
+      RouteTableId: !Ref PrivateRouteTableApp
+
+  # Private Subnet (DB)用ルートテーブル
+  # DBはインターネットアクセス不要、VPC内通信のみ
+  PrivateRouteTableDB:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref AppVPC
+      Tags:
+        - Key: Name
+          Value: !Sub CareApp-${Environment}-RT-PrivateDB
+        - Key: Project
+          Value: CareApp
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  PrivateSubnetDB1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetDB1
+      RouteTableId: !Ref PrivateRouteTableDB
+
+  # ========================================
+  # Transit Gateway Attachment
+  # ========================================
+  # App VPCをTransit Gatewayにアタッチ
+  AppVPCTransitGatewayAttachment:
+    Type: AWS::EC2::TransitGatewayAttachment
+    Properties:
+      TransitGatewayId:
+        Fn::ImportValue: !Sub ${SharedNetworkStackName}-TransitGatewayID
+      VpcId: !Ref AppVPC
+      SubnetIds:
+        - !Ref PrivateSubnetApp1
+      Tags:
+        - Key: Name
+          Value: !Sub CareApp-${Environment}-TGW-Attachment-App
+        - Key: Project
+          Value: CareApp
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ========================================
+  # Security Groups
+  # ========================================
+  # ALB用セキュリティグループ
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub CareApp-${Environment}-SG-ALB
+      GroupDescription: Security Group for Application Load Balancer
+      VpcId: !Ref AppVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS from Internet
+      Tags:
+        - Key: Name
+          Value: !Sub CareApp-${Environment}-SG-ALB
+        - Key: Project
+          Value: CareApp
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ALB → ECS への通信許可
+  ALBSecurityGroupEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref ALBSecurityGroup
+      IpProtocol: tcp
+      FromPort: 8080
+      ToPort: 8080
+      DestinationSecurityGroupId: !Ref ECSSecurityGroup
+      Description: To ECS Tasks
+
+  # ECS用セキュリティグループ
+  ECSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub CareApp-${Environment}-SG-ECS
+      GroupDescription: Security Group for ECS Fargate Tasks
+      VpcId: !Ref AppVPC
+      Tags:
+        - Key: Name
+          Value: !Sub CareApp-${Environment}-SG-ECS
+        - Key: Project
+          Value: CareApp
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ALB → ECS への通信許可
+  ECSSecurityGroupIngressFromALB:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ECSSecurityGroup
+      IpProtocol: tcp
+      FromPort: 8080
+      ToPort: 8080
+      SourceSecurityGroupId: !Ref ALBSecurityGroup
+      Description: From ALB
+
+  # ECS → インターネット（HTTPS）
+  ECSSecurityGroupEgressHTTPS:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref ECSSecurityGroup
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      CidrIp: 0.0.0.0/0
+      Description: To Internet (ECR pull, external API)
+
+  # ECS → RDS への通信許可
+  ECSSecurityGroupEgressToRDS:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref ECSSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      DestinationSecurityGroupId: !Ref RDSSecurityGroup
+      Description: To RDS PostgreSQL
+
+  # RDS用セキュリティグループ
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub CareApp-${Environment}-SG-RDS
+      GroupDescription: Security Group for RDS PostgreSQL
+      VpcId: !Ref AppVPC
+      Tags:
+        - Key: Name
+          Value: !Sub CareApp-${Environment}-SG-RDS
+        - Key: Project
+          Value: CareApp
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ECS → RDS への通信許可
+  RDSSecurityGroupIngressFromECS:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref RDSSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId: !Ref ECSSecurityGroup
+      Description: From ECS Tasks
+
+  # ========================================
+  # Application Load Balancer
+  # ========================================
+  ALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub CareApp-${Environment}-ALB-App
+      Type: application
+      Scheme: internet-facing
+      IpAddressType: ipv4
+      Subnets:
+        - !Ref PublicSubnet1
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub CareApp-${Environment}-ALB-App
+        - Key: Project
+          Value: CareApp
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ALB Target Group（Frontend用）
+  FrontendTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub CareApp-${Environment}-TG-Frontend
+      VpcId: !Ref AppVPC
+      Protocol: HTTP
+      Port: 8080
+      TargetType: ip
+      HealthCheckEnabled: true
+      HealthCheckPath: /health
+      HealthCheckProtocol: HTTP
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Tags:
+        - Key: Name
+          Value: !Sub CareApp-${Environment}-TG-Frontend
+        - Key: Project
+          Value: CareApp
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ALB Target Group（Backend用）
+  BackendTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub CareApp-${Environment}-TG-Backend
+      VpcId: !Ref AppVPC
+      Protocol: HTTP
+      Port: 8080
+      TargetType: ip
+      HealthCheckEnabled: true
+      HealthCheckPath: /api/health
+      HealthCheckProtocol: HTTP
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Tags:
+        - Key: Name
+          Value: !Sub CareApp-${Environment}-TG-Backend
+        - Key: Project
+          Value: CareApp
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ALB Listener（HTTPS）
+  ALBListenerHTTPS:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ALB
+      Protocol: HTTPS
+      Port: 443
+      Certificates:
+        - CertificateArn: !Sub
+            - arn:aws:acm:${AWS::Region}:${AWS::AccountId}:certificate/${CertId}
+            - CertId: REPLACE_WITH_YOUR_ACM_CERT_ID  # ACM証明書作成後、置き換える
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref FrontendTargetGroup
+
+  # ALB Listener Rule（Backend用）
+  ALBListenerRuleBackend:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref ALBListenerHTTPS
+      Priority: 10
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - /api/*
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref BackendTargetGroup
+
+  # ========================================
+  # VPC Flow Logs
+  # ========================================
+  VPCFlowLogRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub CareApp-${Environment}-Role-VPCFlowLog
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: vpc-flow-logs.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CloudWatchLogPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogGroups
+                  - logs:DescribeLogStreams
+                Resource: '*'
+
+  VPCFlowLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/vpc/${AWS::StackName}
+      RetentionInDays: 90
+
+  VPCFlowLog:
+    Type: AWS::EC2::FlowLog
+    Properties:
+      ResourceType: VPC
+      ResourceIds:
+        - !Ref AppVPC
+      TrafficType: ALL
+      LogDestinationType: cloud-watch-logs
+      LogGroupName: !Ref VPCFlowLogGroup
+      DeliverLogsPermissionArn: !GetAtt VPCFlowLogRole.Arn
+      Tags:
+        - Key: Name
+          Value: !Sub CareApp-${Environment}-FlowLog-App
+        - Key: Project
+          Value: CareApp
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+Outputs:
+  AppVPCID:
+    Description: App VPC ID
+    Value: !Ref AppVPC
+    Export:
+      Name: !Sub ${AWS::StackName}-VPCID
+
+  PublicSubnet1ID:
+    Description: Public Subnet 1 ID
+    Value: !Ref PublicSubnet1
+    Export:
+      Name: !Sub ${AWS::StackName}-PublicSubnet1ID
+
+  PrivateSubnetApp1ID:
+    Description: Private Subnet (App) 1 ID
+    Value: !Ref PrivateSubnetApp1
+    Export:
+      Name: !Sub ${AWS::StackName}-PrivateSubnetApp1ID
+
+  PrivateSubnetDB1ID:
+    Description: Private Subnet (DB) 1 ID
+    Value: !Ref PrivateSubnetDB1
+    Export:
+      Name: !Sub ${AWS::StackName}-PrivateSubnetDB1ID
+
+  ALBArn:
+    Description: Application Load Balancer ARN
+    Value: !Ref ALB
+    Export:
+      Name: !Sub ${AWS::StackName}-ALBArn
+
+  ALBDNSName:
+    Description: Application Load Balancer DNS Name
+    Value: !GetAtt ALB.DNSName
+    Export:
+      Name: !Sub ${AWS::StackName}-ALBDNSName
+
+  FrontendTargetGroupArn:
+    Description: Frontend Target Group ARN
+    Value: !Ref FrontendTargetGroup
+    Export:
+      Name: !Sub ${AWS::StackName}-FrontendTargetGroupArn
+
+  BackendTargetGroupArn:
+    Description: Backend Target Group ARN
+    Value: !Ref BackendTargetGroup
+    Export:
+      Name: !Sub ${AWS::StackName}-BackendTargetGroupArn
+
+  ECSSecurityGroupID:
+    Description: ECS Security Group ID
+    Value: !Ref ECSSecurityGroup
+    Export:
+      Name: !Sub ${AWS::StackName}-ECSSecurityGroupID
+
+  RDSSecurityGroupID:
+    Description: RDS Security Group ID
+    Value: !Ref RDSSecurityGroup
+    Export:
+      Name: !Sub ${AWS::StackName}-RDSSecurityGroupID

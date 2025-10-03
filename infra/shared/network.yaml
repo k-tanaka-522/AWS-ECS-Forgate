@@ -1,72 +1,71 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'CareApp - Shared Network Stack (VPC, Transit Gateway, Client VPN)'
+Description: |
+  CareApp 共有系ネットワークスタック
 
-Parameters:
-  Environment:
-    Type: String
-    Default: POC
-    AllowedValues:
-      - POC
-      - Production
-    Description: Environment name
+  このテンプレートは以下を定義します：
+  - Shared VPC（10.0.0.0/16）
+  - Transit Gateway
+  - Client VPN Endpoint（POC環境のみ）
 
-  SharedVPCCIDR:
-    Type: String
-    Default: 10.0.0.0/16
-    Description: CIDR block for Shared VPC
+  依存スタック: なし
 
-  PublicSubnet1CIDR:
-    Type: String
-    Default: 10.0.1.0/24
-    Description: CIDR block for Public Subnet 1 (AZ-a)
-
-  ClientVPNServerCertificateArn:
-    Type: String
-    Description: ACM Certificate ARN for Client VPN Server
-    Default: ''
-
-  ClientVPNClientCertificateArn:
-    Type: String
-    Description: ACM Certificate ARN for Client VPN Client (Mutual Auth)
-    Default: ''
-
-  ClientVPNCIDR:
-    Type: String
-    Default: 10.100.0.0/22
-    Description: CIDR block for Client VPN clients
-
-Conditions:
-  HasClientVPNCertificates: !And
-    - !Not [!Equals [!Ref ClientVPNServerCertificateArn, '']]
-    - !Not [!Equals [!Ref ClientVPNClientCertificateArn, '']]
+  作成日: 2025-10-03
+  管理者: インフラチーム
 
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label:
-          default: Environment Configuration
+          default: 環境設定
         Parameters:
           - Environment
       - Label:
-          default: Network Configuration
+          default: ネットワーク設定
         Parameters:
-          - SharedVPCCIDR
-          - PublicSubnet1CIDR
-          - ClientVPNCIDR
-      - Label:
-          default: Client VPN Configuration
-        Parameters:
-          - ClientVPNServerCertificateArn
-          - ClientVPNClientCertificateArn
+          - SharedVpcCidr
+          - ClientVpnCidr
+    ParameterLabels:
+      Environment:
+        default: 環境名
+      SharedVpcCidr:
+        default: Shared VPC CIDR
+      ClientVpnCidr:
+        default: Client VPN CIDR
+
+Parameters:
+  Environment:
+    Type: String
+    Description: 環境名（POC/Production）
+    AllowedValues:
+      - POC
+      - Production
+    Default: POC
+
+  SharedVpcCidr:
+    Type: String
+    Description: Shared VPC CIDR（例: 10.0.0.0/16）
+    Default: 10.0.0.0/16
+    AllowedPattern: ^(10|172|192)\.\d{1,3}\.\d{1,3}\.\d{1,3}/\d{1,2}$
+    ConstraintDescription: 有効なプライベートIPアドレス範囲を指定してください
+
+  ClientVpnCidr:
+    Type: String
+    Description: Client VPN CIDR（例: 10.255.0.0/16）
+    Default: 10.255.0.0/16
+    AllowedPattern: ^(10|172|192)\.\d{1,3}\.\d{1,3}\.\d{1,3}/\d{1,2}$
+    ConstraintDescription: 有効なプライベートIPアドレス範囲を指定してください
+
+Conditions:
+  IsPOC: !Equals [!Ref Environment, POC]
 
 Resources:
   # ========================================
-  # VPC
+  # Shared VPC
   # ========================================
   SharedVPC:
     Type: AWS::EC2::VPC
     Properties:
-      CidrBlock: !Ref SharedVPCCIDR
+      CidrBlock: !Ref SharedVpcCidr
       EnableDnsHostnames: true
       EnableDnsSupport: true
       Tags:
@@ -78,101 +77,42 @@ Resources:
           Value: !Ref Environment
         - Key: ManagedBy
           Value: CloudFormation
-
-  # ========================================
-  # Internet Gateway
-  # ========================================
-  InternetGateway:
-    Type: AWS::EC2::InternetGateway
-    Properties:
-      Tags:
-        - Key: Name
-          Value: !Sub CareApp-${Environment}-IGW-Shared
-        - Key: Project
-          Value: CareApp
-        - Key: Environment
-          Value: !Ref Environment
-
-  AttachGateway:
-    Type: AWS::EC2::VPCGatewayAttachment
-    Properties:
-      VpcId: !Ref SharedVPC
-      InternetGatewayId: !Ref InternetGateway
-
-  # ========================================
-  # Subnets
-  # ========================================
-  PublicSubnet1:
-    Type: AWS::EC2::Subnet
-    Properties:
-      VpcId: !Ref SharedVPC
-      CidrBlock: !Ref PublicSubnet1CIDR
-      AvailabilityZone: !Select [0, !GetAZs '']
-      MapPublicIpOnLaunch: true
-      Tags:
-        - Key: Name
-          Value: !Sub CareApp-${Environment}-Subnet-Shared-Public-1a
-        - Key: Project
-          Value: CareApp
-        - Key: Environment
-          Value: !Ref Environment
-
-  # ========================================
-  # Route Tables
-  # ========================================
-  PublicRouteTable:
-    Type: AWS::EC2::RouteTable
-    Properties:
-      VpcId: !Ref SharedVPC
-      Tags:
-        - Key: Name
-          Value: !Sub CareApp-${Environment}-RT-Shared-Public
-        - Key: Project
-          Value: CareApp
-        - Key: Environment
-          Value: !Ref Environment
-
-  PublicRoute:
-    Type: AWS::EC2::Route
-    DependsOn: AttachGateway
-    Properties:
-      RouteTableId: !Ref PublicRouteTable
-      DestinationCidrBlock: 0.0.0.0/0
-      GatewayId: !Ref InternetGateway
-
-  PublicSubnet1RouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      SubnetId: !Ref PublicSubnet1
-      RouteTableId: !Ref PublicRouteTable
+        - Key: Component
+          Value: SharedNetwork
 
   # ========================================
   # Transit Gateway
   # ========================================
+  # VPC間を接続するHub
   TransitGateway:
     Type: AWS::EC2::TransitGateway
     Properties:
-      Description: !Sub CareApp ${Environment} Transit Gateway
+      AmazonSideAsn: 64512
       DefaultRouteTableAssociation: enable
       DefaultRouteTablePropagation: enable
-      DnsSupport: enable
-      VpnEcmpSupport: enable
+      Description: !Sub CareApp ${Environment} Transit Gateway
       Tags:
         - Key: Name
-          Value: !Sub CareApp-${Environment}-TGW
+          Value: !Sub CareApp-${Environment}-TransitGateway
         - Key: Project
           Value: CareApp
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Component
+          Value: SharedNetwork
 
-  # Transit Gateway Attachment for Shared VPC
-  TransitGatewayAttachmentShared:
+  # Shared VPC を Transit Gateway にアタッチ
+  SharedVPCTransitGatewayAttachment:
     Type: AWS::EC2::TransitGatewayAttachment
+    DependsOn:
+      - SharedVPC
+      - TransitGateway
     Properties:
       TransitGatewayId: !Ref TransitGateway
       VpcId: !Ref SharedVPC
-      SubnetIds:
-        - !Ref PublicSubnet1
+      SubnetIds: []  # Shared VPCにはサブネット不要（Attachment用VPC）
       Tags:
         - Key: Name
           Value: !Sub CareApp-${Environment}-TGW-Attachment-Shared
@@ -180,39 +120,35 @@ Resources:
           Value: CareApp
         - Key: Environment
           Value: !Ref Environment
-
-  # Route to Transit Gateway (will be used after App VPC is attached)
-  RouteToTransitGateway:
-    Type: AWS::EC2::Route
-    DependsOn: TransitGatewayAttachmentShared
-    Properties:
-      RouteTableId: !Ref PublicRouteTable
-      DestinationCidrBlock: 10.1.0.0/16  # App VPC CIDR
-      TransitGatewayId: !Ref TransitGateway
+        - Key: ManagedBy
+          Value: CloudFormation
 
   # ========================================
-  # Client VPN Endpoint
+  # Client VPN（POC環境のみ）
   # ========================================
+  # 市職員がVPN経由でApp VPCにアクセスするためのエンドポイント
   ClientVPNEndpoint:
     Type: AWS::EC2::ClientVpnEndpoint
-    Condition: HasClientVPNCertificates
+    Condition: IsPOC
     Properties:
-      Description: !Sub CareApp ${Environment} Client VPN
-      ClientCidrBlock: !Ref ClientVPNCIDR
-      ServerCertificateArn: !Ref ClientVPNServerCertificateArn
+      ClientCidrBlock: !Ref ClientVpnCidr
+      ServerCertificateArn: !Sub
+        - arn:aws:acm:${AWS::Region}:${AWS::AccountId}:certificate/${CertId}
+        - CertId: REPLACE_WITH_YOUR_SERVER_CERT_ID  # 手動で証明書作成後、置き換える
       AuthenticationOptions:
         - Type: certificate-authentication
           MutualAuthentication:
-            ClientRootCertificateChainArn: !Ref ClientVPNClientCertificateArn
+            ClientRootCertificateChainArn: !Sub
+              - arn:aws:acm:${AWS::Region}:${AWS::AccountId}:certificate/${CertId}
+              - CertId: REPLACE_WITH_YOUR_CLIENT_CERT_ID  # 手動で証明書作成後、置き換える
       ConnectionLogOptions:
         Enabled: true
         CloudwatchLogGroup: !Ref ClientVPNLogGroup
-        CloudwatchLogStream: !GetAtt ClientVPNLogStream.Arn
-      DnsServers:
-        - 10.0.0.2  # VPC DNS
-      SplitTunnel: true
-      VpnPort: 443
-      TransportProtocol: udp
+      Description: !Sub CareApp ${Environment} Client VPN Endpoint
+      SplitTunnel: true  # 10.0.0.0/8のみVPN経由、それ以外はローカルインターネット
+      VpcId: !Ref SharedVPC
+      SecurityGroupIds:
+        - !Ref ClientVPNSecurityGroup
       TagSpecifications:
         - ResourceType: client-vpn-endpoint
           Tags:
@@ -222,71 +158,34 @@ Resources:
               Value: CareApp
             - Key: Environment
               Value: !Ref Environment
+            - Key: ManagedBy
+              Value: CloudFormation
 
-  ClientVPNTargetNetworkAssociation:
-    Type: AWS::EC2::ClientVpnTargetNetworkAssociation
-    Condition: HasClientVPNCertificates
-    Properties:
-      ClientVpnEndpointId: !Ref ClientVPNEndpoint
-      SubnetId: !Ref PublicSubnet1
-
-  ClientVPNAuthorizationRule:
-    Type: AWS::EC2::ClientVpnAuthorizationRule
-    Condition: HasClientVPNCertificates
-    Properties:
-      ClientVpnEndpointId: !Ref ClientVPNEndpoint
-      TargetNetworkCidr: 10.1.0.0/16  # App VPC CIDR
-      AuthorizeAllGroups: true
-      Description: Allow access to App VPC
-
-  ClientVPNRouteToAppVPC:
-    Type: AWS::EC2::ClientVpnRoute
-    Condition: HasClientVPNCertificates
-    DependsOn: ClientVPNTargetNetworkAssociation
-    Properties:
-      ClientVpnEndpointId: !Ref ClientVPNEndpoint
-      DestinationCidrBlock: 10.1.0.0/16  # App VPC CIDR
-      TargetVpcSubnetId: !Ref PublicSubnet1
-      Description: Route to App VPC via Transit Gateway
-
-  # CloudWatch Logs for Client VPN
+  # Client VPN用CloudWatch Logs
   ClientVPNLogGroup:
     Type: AWS::Logs::LogGroup
-    Condition: HasClientVPNCertificates
+    Condition: IsPOC
     Properties:
-      LogGroupName: !Sub /aws/clientvpn/${Environment}
-      RetentionInDays: 30
+      LogGroupName: !Sub /aws/clientvpn/${AWS::StackName}
+      RetentionInDays: 90
 
-  ClientVPNLogStream:
-    Type: AWS::Logs::LogStream
-    Condition: HasClientVPNCertificates
-    Properties:
-      LogGroupName: !Ref ClientVPNLogGroup
-      LogStreamName: connection-logs
-
-  # ========================================
-  # Security Group for VPN Traffic
-  # ========================================
+  # Client VPN用セキュリティグループ
   ClientVPNSecurityGroup:
     Type: AWS::EC2::SecurityGroup
+    Condition: IsPOC
     Properties:
-      GroupDescription: Security group for Client VPN connections
+      GroupDescription: Security Group for Client VPN Endpoint
       VpcId: !Ref SharedVPC
       SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 443
-          ToPort: 443
-          CidrIp: 0.0.0.0/0
-          Description: Client VPN HTTPS
         - IpProtocol: udp
           FromPort: 443
           ToPort: 443
           CidrIp: 0.0.0.0/0
-          Description: Client VPN UDP
+          Description: Client VPN接続
       SecurityGroupEgress:
         - IpProtocol: -1
           CidrIp: 0.0.0.0/0
-          Description: Allow all outbound
+          Description: すべての送信を許可
       Tags:
         - Key: Name
           Value: !Sub CareApp-${Environment}-SG-ClientVPN
@@ -294,46 +193,31 @@ Resources:
           Value: CareApp
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
 Outputs:
-  # VPC
   SharedVPCID:
     Description: Shared VPC ID
     Value: !Ref SharedVPC
     Export:
-      Name: !Sub CareApp-${Environment}-SharedNetwork-VPCID
+      Name: !Sub ${AWS::StackName}-VPCID
 
-  SharedVPCCIDR:
+  SharedVPCCidr:
     Description: Shared VPC CIDR
-    Value: !Ref SharedVPCCIDR
+    Value: !Ref SharedVpcCidr
     Export:
-      Name: !Sub CareApp-${Environment}-SharedNetwork-VPCCIDR
+      Name: !Sub ${AWS::StackName}-VPCCidr
 
-  # Transit Gateway
   TransitGatewayID:
     Description: Transit Gateway ID
     Value: !Ref TransitGateway
     Export:
-      Name: !Sub CareApp-${Environment}-SharedNetwork-TransitGatewayID
+      Name: !Sub ${AWS::StackName}-TransitGatewayID
 
-  # Client VPN
   ClientVPNEndpointID:
+    Condition: IsPOC
     Description: Client VPN Endpoint ID
-    Condition: HasClientVPNCertificates
     Value: !Ref ClientVPNEndpoint
     Export:
-      Name: !Sub CareApp-${Environment}-SharedNetwork-ClientVPNEndpointID
-
-  ClientVPNDNSName:
-    Description: Client VPN DNS Name
-    Condition: HasClientVPNCertificates
-    Value: !GetAtt ClientVPNEndpoint.DnsName
-    Export:
-      Name: !Sub CareApp-${Environment}-SharedNetwork-ClientVPNDNSName
-
-  # Subnets
-  PublicSubnet1ID:
-    Description: Public Subnet 1 ID
-    Value: !Ref PublicSubnet1
-    Export:
-      Name: !Sub CareApp-${Environment}-SharedNetwork-PublicSubnet1ID
+      Name: !Sub ${AWS::StackName}-ClientVPNEndpointID

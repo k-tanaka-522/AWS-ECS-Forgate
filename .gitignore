@@ -56,3 +56,6 @@ coverage/
 
 # テスト
 .pytest_cache/
+
+# レビュー用の一時ディレクトリ
+review-temp/

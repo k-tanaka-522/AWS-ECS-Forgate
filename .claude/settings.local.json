@@ -4,7 +4,16 @@
       "Bash(mkdir:*)",
       "Bash(gh:*)",
       "Bash(git init:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nInitial commit: AI Development Facilitator Phase 1\n\nAI開発ファシリテーターの初回リリース。Claude Code環境で動作し、\nシステム開発プロセス全体をファシリテートする。\n\n主な機能:\n- 対話型開発プロセス（企画→要件定義→設計→実装→テスト→デプロイ）\n- 一問一答形式のヒアリング\n- ビジネス背景を重視した要件収集\n- 納品レベルのドキュメント自動生成\n- 技術標準に準拠したコード生成\n- AWS IaC構築サポート（Terraform/CloudFormation）\n- カスタムコマンド（/status, /next）\n- プロジェクト状態管理\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(git remote add:*)",
+      "Bash(git push:*)",
+      "Bash(git branch:*)",
+      "Bash(git fetch:*)",
+      "Bash(git commit:*)",
+      "Bash(git clone:*)",
+      "Bash(git log:*)",
+      "Bash(chmod:*)"
     ],
     "deny": [],
     "ask": []

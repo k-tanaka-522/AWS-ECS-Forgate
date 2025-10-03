@@ -1,0 +1,388 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: |
+  CareApp データベーススタック
+
+  このテンプレートは以下を定義します：
+  - RDS PostgreSQL 15
+  - DB Subnet Group
+  - Secrets Manager（DB接続情報）
+
+  依存スタック:
+  - CareApp-POC-AppNetwork（VPC ID、Subnet IDs、Security Group ID参照）
+
+  作成日: 2025-10-03
+  管理者: インフラチーム
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: 環境設定
+        Parameters:
+          - Environment
+          - AppNetworkStackName
+      - Label:
+          default: データベース設定
+        Parameters:
+          - DBInstanceClass
+          - DBAllocatedStorage
+          - DBName
+          - DBMasterUsername
+
+Parameters:
+  Environment:
+    Type: String
+    Description: 環境名（POC/Production）
+    AllowedValues:
+      - POC
+      - Production
+    Default: POC
+
+  AppNetworkStackName:
+    Type: String
+    Description: アプリ系ネットワークスタック名
+    Default: CareApp-POC-AppNetwork
+
+  DBInstanceClass:
+    Type: String
+    Description: RDSインスタンスクラス
+    Default: db.t3.micro
+    AllowedValues:
+      - db.t3.micro
+      - db.t3.small
+      - db.m5.large
+      - db.m5.xlarge
+
+  DBAllocatedStorage:
+    Type: Number
+    Description: DB割り当てストレージ（GB）
+    Default: 20
+    MinValue: 20
+    MaxValue: 1000
+
+  DBName:
+    Type: String
+    Description: データベース名
+    Default: careapp
+
+  DBMasterUsername:
+    Type: String
+    Description: DBマスターユーザー名
+    Default: admin
+
+Conditions:
+  IsProduction: !Equals [!Ref Environment, Production]
+
+Resources:
+  # ========================================
+  # Secrets Manager（DB接続情報）
+  # ========================================
+  # DBパスワードを自動生成してSecrets Managerに保存
+  DBSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub CareApp-${Environment}-DB-Secret
+      Description: !Sub CareApp ${Environment} RDS PostgreSQL credentials
+      GenerateSecretString:
+        SecretStringTemplate: !Sub |
+          {
+            "username": "${DBMasterUsername}",
+            "dbname": "${DBName}",
+            "engine": "postgres",
+            "port": 5432
+          }
+        GenerateStringKey: password
+        PasswordLength: 32
+        ExcludeCharacters: '"@/\'
+      Tags:
+        - Key: Name
+          Value: !Sub CareApp-${Environment}-DB-Secret
+        - Key: Project
+          Value: CareApp
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Component
+          Value: Database
+
+  # Secrets Managerとの自動ローテーション連携（本番のみ）
+  SecretRotationSchedule:
+    Type: AWS::SecretsManager::RotationSchedule
+    Condition: IsProduction
+    DependsOn: DBInstance
+    Properties:
+      SecretId: !Ref DBSecret
+      RotationLambdaARN: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:SecretsManagerRDSPostgreSQLRotationSingleUser
+      RotationRules:
+        AutomaticallyAfterDays: 90
+
+  # ========================================
+  # DB Subnet Group
+  # ========================================
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupName: !Sub CareApp-${Environment}-DBSubnetGroup
+      DBSubnetGroupDescription: !Sub CareApp ${Environment} DB Subnet Group
+      SubnetIds:
+        - Fn::ImportValue: !Sub ${AppNetworkStackName}-PrivateSubnetDB1ID
+      Tags:
+        - Key: Name
+          Value: !Sub CareApp-${Environment}-DBSubnetGroup
+        - Key: Project
+          Value: CareApp
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ========================================
+  # RDS PostgreSQL
+  # ========================================
+  DBInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: !If [IsProduction, Snapshot, Delete]
+    UpdateReplacePolicy: !If [IsProduction, Snapshot, Delete]
+    Properties:
+      DBInstanceIdentifier: !Sub CareApp-${Environment}-RDS-Main
+      Engine: postgres
+      EngineVersion: '15.4'
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: !Ref DBAllocatedStorage
+      StorageType: gp3
+      StorageEncrypted: !If [IsProduction, true, false]
+      MultiAZ: !If [IsProduction, true, false]
+
+      # DB接続情報（Secrets Manager参照）
+      DBName: !Ref DBName
+      MasterUsername: !Sub '{{resolve:secretsmanager:${DBSecret}:SecretString:username}}'
+      MasterUserPassword: !Sub '{{resolve:secretsmanager:${DBSecret}:SecretString:password}}'
+
+      # ネットワーク設定
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups:
+        - Fn::ImportValue: !Sub ${AppNetworkStackName}-RDSSecurityGroupID
+      PubliclyAccessible: false
+
+      # バックアップ設定
+      BackupRetentionPeriod: !If [IsProduction, 30, 7]
+      PreferredBackupWindow: 17:00-18:00  # JST 02:00-03:00
+      PreferredMaintenanceWindow: sun:18:00-sun:19:00  # JST 日曜 03:00-04:00
+      CopyTagsToSnapshot: true
+
+      # パフォーマンス設定
+      EnablePerformanceInsights: !If [IsProduction, true, false]
+      PerformanceInsightsRetentionPeriod: !If [IsProduction, 7, !Ref AWS::NoValue]
+      MonitoringInterval: !If [IsProduction, 60, 0]
+      MonitoringRoleArn: !If [IsProduction, !GetAtt RDSMonitoringRole.Arn, !Ref AWS::NoValue]
+
+      # パラメータグループ
+      DBParameterGroupName: !Ref DBParameterGroup
+
+      # ログエクスポート
+      EnableCloudwatchLogsExports:
+        - postgresql
+
+      # 削除保護（本番のみ）
+      DeletionProtection: !If [IsProduction, true, false]
+
+      Tags:
+        - Key: Name
+          Value: !Sub CareApp-${Environment}-RDS-Main
+        - Key: Project
+          Value: CareApp
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Component
+          Value: Database
+
+  # ========================================
+  # DB Parameter Group
+  # ========================================
+  DBParameterGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      DBParameterGroupName: !Sub CareApp-${Environment}-PG-Postgres15
+      Family: postgres15
+      Description: !Sub CareApp ${Environment} PostgreSQL 15 Parameter Group
+      Parameters:
+        # 文字コード設定
+        client_encoding: UTF8
+        timezone: Asia/Tokyo
+
+        # ログ設定（スロークエリのみ記録）
+        log_min_duration_statement: 1000  # 1秒以上のクエリをログ記録
+
+        # 接続設定
+        max_connections: !If [IsProduction, 200, 100]
+
+      Tags:
+        - Key: Name
+          Value: !Sub CareApp-${Environment}-PG-Postgres15
+        - Key: Project
+          Value: CareApp
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ========================================
+  # CloudWatch Alarms
+  # ========================================
+  # RDS CPU使用率アラート
+  RDSCPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub CareApp-${Environment}-RDS-HighCPU
+      AlarmDescription: RDS CPU使用率が80%を超えました
+      MetricName: CPUUtilization
+      Namespace: AWS/RDS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref DBInstance
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref SNSTopic
+
+  # RDS空きストレージアラート
+  RDSStorageAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub CareApp-${Environment}-RDS-LowStorage
+      AlarmDescription: RDS空きストレージが20%を下回りました
+      MetricName: FreeStorageSpace
+      Namespace: AWS/RDS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: !Ref DBAllocatedStorage
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref DBInstance
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref SNSTopic
+      TreatMissingData: notBreaching
+
+  # RDS接続数アラート
+  RDSConnectionsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub CareApp-${Environment}-RDS-HighConnections
+      AlarmDescription: RDS接続数が上限の80%を超えました
+      MetricName: DatabaseConnections
+      Namespace: AWS/RDS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: !If [IsProduction, 160, 80]  # max_connectionsの80%
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref DBInstance
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref SNSTopic
+
+  # ========================================
+  # SNS Topic（アラート通知）
+  # ========================================
+  SNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub CareApp-${Environment}-RDS-Alerts
+      DisplayName: !Sub CareApp ${Environment} RDS Alerts
+      Tags:
+        - Key: Name
+          Value: !Sub CareApp-${Environment}-RDS-Alerts
+        - Key: Project
+          Value: CareApp
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # SNS Subscription（メール通知）
+  SNSSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref SNSTopic
+      Protocol: email
+      Endpoint: REPLACE_WITH_YOUR_EMAIL  # 通知先メールアドレスを指定
+
+  # ========================================
+  # IAM Role（RDS Enhanced Monitoring用）
+  # ========================================
+  RDSMonitoringRole:
+    Type: AWS::IAM::Role
+    Condition: IsProduction
+    Properties:
+      RoleName: !Sub CareApp-${Environment}-Role-RDSMonitoring
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: monitoring.rds.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole
+      Tags:
+        - Key: Name
+          Value: !Sub CareApp-${Environment}-Role-RDSMonitoring
+        - Key: Project
+          Value: CareApp
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ========================================
+  # Secrets ManagerとRDSの紐付け
+  # ========================================
+  SecretRDSAttachment:
+    Type: AWS::SecretsManager::SecretTargetAttachment
+    Properties:
+      SecretId: !Ref DBSecret
+      TargetId: !Ref DBInstance
+      TargetType: AWS::RDS::DBInstance
+
+Outputs:
+  DBInstanceID:
+    Description: RDS DB Instance ID
+    Value: !Ref DBInstance
+    Export:
+      Name: !Sub ${AWS::StackName}-DBInstanceID
+
+  DBEndpoint:
+    Description: RDS Endpoint
+    Value: !GetAtt DBInstance.Endpoint.Address
+    Export:
+      Name: !Sub ${AWS::StackName}-RDSEndpoint
+
+  DBPort:
+    Description: RDS Port
+    Value: !GetAtt DBInstance.Endpoint.Port
+    Export:
+      Name: !Sub ${AWS::StackName}-RDSPort
+
+  DBName:
+    Description: Database Name
+    Value: !Ref DBName
+    Export:
+      Name: !Sub ${AWS::StackName}-DBName
+
+  DBSecretArn:
+    Description: Secrets Manager Secret ARN（DB接続情報）
+    Value: !Ref DBSecret
+    Export:
+      Name: !Sub ${AWS::StackName}-SecretArn
