@@ -1,0 +1,31 @@
+{
+  "name": "careapp-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "public",
+    "admin",
+    "batch",
+    "shared"
+  ],
+  "scripts": {
+    "install:all": "npm install",
+    "build:public": "npm run build --workspace=public",
+    "build:admin": "npm run build --workspace=admin",
+    "build:batch": "npm run build --workspace=batch",
+    "build:all": "npm run build --workspaces",
+    "dev:public": "npm run dev --workspace=public",
+    "dev:admin": "npm run dev --workspace=admin",
+    "dev:batch": "npm run dev --workspace=batch",
+    "test:all": "npm run test --workspaces",
+    "lint:all": "npm run lint --workspaces"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  }
+}

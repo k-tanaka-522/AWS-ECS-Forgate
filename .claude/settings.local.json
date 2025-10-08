@@ -13,7 +13,10 @@
       "Bash(git commit:*)",
       "Bash(git clone:*)",
       "Bash(git log:*)",
-      "Bash(chmod:*)"
+      "Bash(chmod:*)",
+      "Bash(move:*)",
+      "Bash(powershell:*)",
+      "SlashCommand(/init)"
     ],
     "deny": [],
     "ask": []

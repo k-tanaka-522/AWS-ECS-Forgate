@@ -1,0 +1,276 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CareApp Service - Compute Stack (ECS Fargate + ALB)'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: POC
+    AllowedValues:
+      - POC
+      - Production
+    Description: Environment name
+
+  ProjectName:
+    Type: String
+    Default: CareApp
+    Description: Project name for resource naming
+
+  NetworkStackName:
+    Type: String
+    Description: Name of the network stack to import values from
+
+  DatabaseStackName:
+    Type: String
+    Description: Name of the database stack to import values from
+
+  ContainerImage:
+    Type: String
+    Default: public.ecr.aws/docker/library/node:20-alpine
+    Description: Container image URL (will be replaced with ECR image later)
+
+  DBMasterUsername:
+    Type: String
+    Default: postgres
+    NoEcho: true
+    Description: Database username
+
+  DBMasterPassword:
+    Type: String
+    NoEcho: true
+    Description: Database password
+
+Resources:
+  # ========================================
+  # Application Load Balancer
+  # ========================================
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub '${ProjectName}-${Environment}-ALB'
+      Type: application
+      Scheme: internet-facing
+      IpAddressType: ipv4
+      Subnets:
+        - Fn::ImportValue: !Sub '${NetworkStackName}-Subnet-Public-AZ1'
+        - Fn::ImportValue: !Sub '${NetworkStackName}-Subnet-Public-AZ2'
+      SecurityGroups:
+        - Fn::ImportValue: !Sub '${NetworkStackName}-SG-ALB'
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-ALB'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  ALBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub '${ProjectName}-${Environment}-TG'
+      Port: 3000
+      Protocol: HTTP
+      TargetType: ip
+      VpcId:
+        Fn::ImportValue: !Sub '${NetworkStackName}-VPC-ID'
+      HealthCheckEnabled: true
+      HealthCheckPath: /health
+      HealthCheckProtocol: HTTP
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-TG'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref ALBTargetGroup
+
+  # ========================================
+  # ECS Cluster
+  # ========================================
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub '${ProjectName}-${Environment}-Cluster'
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-Cluster'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ========================================
+  # IAM Roles
+  # ========================================
+  ECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-${Environment}-ECSTaskExecutionRole'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-ECSTaskExecutionRole'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  ECSTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-${Environment}-ECSTaskRole'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-ECSTaskRole'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ========================================
+  # CloudWatch Logs
+  # ========================================
+  ECSLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/ecs/${ProjectName}-${Environment}'
+      RetentionInDays: 7
+
+  # ========================================
+  # ECS Task Definition
+  # ========================================
+  ECSTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub '${ProjectName}-${Environment}-Task'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: '256'
+      Memory: '512'
+      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt ECSTaskRole.Arn
+      ContainerDefinitions:
+        - Name: app
+          Image: !Ref ContainerImage
+          PortMappings:
+            - ContainerPort: 3000
+              Protocol: tcp
+          Environment:
+            - Name: DB_HOST
+              Value:
+                Fn::ImportValue: !Sub '${DatabaseStackName}-DB-Endpoint'
+            - Name: DB_PORT
+              Value:
+                Fn::ImportValue: !Sub '${DatabaseStackName}-DB-Port'
+            - Name: DB_NAME
+              Value:
+                Fn::ImportValue: !Sub '${DatabaseStackName}-DB-Name'
+            - Name: DB_USER
+              Value: !Ref DBMasterUsername
+            - Name: DB_PASSWORD
+              Value: !Ref DBMasterPassword
+            - Name: NODE_ENV
+              Value: production
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ECSLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+
+  # ========================================
+  # ECS Service
+  # ========================================
+  ECSService:
+    Type: AWS::ECS::Service
+    DependsOn: ALBListener
+    Properties:
+      ServiceName: !Sub '${ProjectName}-${Environment}-Service'
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref ECSTaskDefinition
+      DesiredCount: 1
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets:
+            - Fn::ImportValue: !Sub '${NetworkStackName}-Subnet-App-AZ1'
+            - Fn::ImportValue: !Sub '${NetworkStackName}-Subnet-App-AZ2'
+          SecurityGroups:
+            - Fn::ImportValue: !Sub '${NetworkStackName}-SG-ECS'
+      LoadBalancers:
+        - ContainerName: app
+          ContainerPort: 3000
+          TargetGroupArn: !Ref ALBTargetGroup
+      HealthCheckGracePeriodSeconds: 60
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-Service'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+Outputs:
+  ECSClusterName:
+    Description: ECS Cluster Name
+    Value: !Ref ECSCluster
+    Export:
+      Name: !Sub '${AWS::StackName}-ECS-Cluster'
+
+  ECSServiceName:
+    Description: ECS Service Name
+    Value: !GetAtt ECSService.Name
+    Export:
+      Name: !Sub '${AWS::StackName}-ECS-Service'
+
+  ALBDNSName:
+    Description: ALB DNS Name
+    Value: !GetAtt ApplicationLoadBalancer.DNSName
+    Export:
+      Name: !Sub '${AWS::StackName}-ALB-DNS'
+
+  ALBArn:
+    Description: ALB ARN
+    Value: !Ref ApplicationLoadBalancer
+    Export:
+      Name: !Sub '${AWS::StackName}-ALB-ARN'
+
+  TargetGroupArn:
+    Description: Target Group ARN
+    Value: !Ref ALBTargetGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-TG-ARN'

@@ -1,0 +1,12 @@
+{
+  "name": "@careapp/shared",
+  "version": "1.0.0",
+  "description": "CareApp Shared Library - Common utilities and database models",
+  "main": "src/index.js",
+  "scripts": {
+    "test": "echo 'Test shared library'"
+  },
+  "dependencies": {
+    "pg": "^8.11.0"
+  }
+}

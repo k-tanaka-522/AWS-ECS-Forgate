@@ -6,8 +6,9 @@
 本ドキュメントは、介護保険申請管理システム（CareApp）のPOC環境におけるAWSインフラ設計を定義します。
 
 ### 1.2 対象範囲
-- **Phase 1**: POC環境のインフラ構築
-- **対象**: Shared VPC、App VPC、Transit Gateway、Client VPN、ECS、RDS、Cognito等のAWSリソース
+- **Phase 1**: POC環境のインフラ構築（Multi-Account構成）
+- **Platform Account**: Shared VPC、Transit Gateway、Client VPN
+- **Service Account**: Service VPC、3サービス（Public/Admin/Batch）、ECS、RDS、ALB、CloudWatch監視等のAWSリソース
 
 ### 1.3 参照ドキュメント
 - [01_CareApp企画書.md](01_CareApp企画書.md)
@@ -21,73 +22,98 @@
 ### 2.1 全体構成
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    CareApp POC環境（1 AWSアカウント）          │
-│                                                             │
-│  ┌─────────────────────┐      ┌────────────────────────┐   │
-│  │  Shared VPC         │      │  App VPC               │   │
-│  │  (10.0.0.0/16)      │      │  (10.1.0.0/16)         │   │
-│  │                     │      │                        │   │
-│  │  ┌───────────────┐  │      │  ┌──────────────────┐  │   │
-│  │  │ Client VPN    │  │      │  │ Public Subnet    │  │   │
-│  │  │ Endpoint      │  │      │  │ (10.1.0.0/24)    │  │   │
-│  │  └───────────────┘  │      │  │                  │  │   │
-│  │         │           │      │  │  ┌───────────┐   │  │   │
-│  │         │           │      │  │  │    ALB    │   │  │   │
-│  │  ┌──────▼────────┐  │      │  │  └─────┬─────┘   │  │   │
-│  │  │ Transit       │◄─┼──────┼──┼────────┘         │  │   │
-│  │  │ Gateway       │  │      │  └──────────────────┘  │   │
-│  │  └───────────────┘  │      │                        │   │
-│  │                     │      │  ┌──────────────────┐  │   │
-│  └─────────────────────┘      │  │ Private Subnet   │  │   │
-│                               │  │ (App)            │  │   │
-│                               │  │ (10.1.1.0/24)    │  │   │
-│                               │  │                  │  │   │
-│                               │  │  ┌───────────┐   │  │   │
-│                               │  │  │ ECS Tasks │   │  │   │
-│                               │  │  └───────────┘   │  │   │
-│                               │  └──────────────────┘  │   │
-│                               │                        │   │
-│                               │  ┌──────────────────┐  │   │
-│                               │  │ Private Subnet   │  │   │
-│                               │  │ (DB)             │  │   │
-│                               │  │ (10.1.2.0/24)    │  │   │
-│                               │  │                  │  │   │
-│                               │  │  ┌───────────┐   │  │   │
-│                               │  │  │    RDS    │   │  │   │
-│                               │  │  └───────────┘   │  │   │
-│                               │  └──────────────────┘  │   │
-│                               │                        │   │
-│                               └────────────────────────┘   │
-│                                                             │
-│  ┌─────────────────────────────────────────────────────┐   │
-│  │ その他のAWSサービス                                    │   │
-│  │ - Cognito User Pool（認証）                           │   │
-│  │ - S3（ファイル保存）                                   │   │
-│  │ - ECR（コンテナイメージ）                               │   │
-│  │ - Secrets Manager（DB接続情報）                        │   │
-│  │ - CloudWatch（監視・ログ）                             │   │
-│  └─────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────┐
+│                   CareApp POC環境（Multi-Account構成）                  │
+│                                                                          │
+│ ┌──────────────────────────────────────────────────────────────────┐   │
+│ │ Platform Account（共通基盤）                                       │   │
+│ │                                                                    │   │
+│ │  ┌────────────────────────┐                                       │   │
+│ │  │ Shared VPC             │                                       │   │
+│ │  │ (10.0.0.0/16)          │                                       │   │
+│ │  │                        │                                       │   │
+│ │  │  ┌─────────────────┐   │                                       │   │
+│ │  │  │ Client VPN      │   │                                       │   │
+│ │  │  │ Endpoint        │   │                                       │   │
+│ │  │  └────────┬────────┘   │                                       │   │
+│ │  │           │            │                                       │   │
+│ │  │  ┌────────▼────────┐   │                                       │   │
+│ │  │  │ Transit Gateway │◄──┼────────┐                             │   │
+│ │  │  └─────────────────┘   │        │                             │   │
+│ │  └────────────────────────┘        │                             │   │
+│ └────────────────────────────────────┼─────────────────────────────┘   │
+│                                       │                                 │
+│ ┌─────────────────────────────────────┼─────────────────────────────┐   │
+│ │ Service Account（業務システム）      │                             │   │
+│ │                                     │                             │   │
+│ │  ┌──────────────────────────────────┼──────────────────────────┐  │   │
+│ │  │ Service VPC (10.1.0.0/16)        │                          │  │   │
+│ │  │                                  │                          │  │   │
+│ │  │  ┌─────────────────────────────────────────────────────┐   │  │   │
+│ │  │  │ Public Subnet (10.1.0.0/24)                         │   │  │   │
+│ │  │  │                                                      │   │  │   │
+│ │  │  │  ┌──────────────┐                                   │   │  │   │
+│ │  │  │  │     ALB      │ ◄── HTTPS（インターネット）        │   │  │   │
+│ │  │  │  └──────┬───────┘                                   │   │  │   │
+│ │  │  └─────────┼─────────────────────────────────────────┘   │  │   │
+│ │  │            │                                              │  │   │
+│ │  │  ┌─────────▼─────────────────────────────────────────┐   │  │   │
+│ │  │  │ Private Subnet - App (10.1.1.0/24)                 │   │  │   │
+│ │  │  │                                                      │   │  │   │
+│ │  │  │  ┌────────────┐  ┌────────────┐  ┌────────────┐   │   │  │   │
+│ │  │  │  │ Public     │  │  Admin     │  │   Batch    │   │   │  │   │
+│ │  │  │  │ Service    │  │  Service   │  │  Service   │   │   │  │   │
+│ │  │  │  │ (ECS)      │  │  (ECS)     │  │  (ECS)     │   │   │  │   │
+│ │  │  │  └────────────┘  └────────────┘  └────────────┘   │   │  │   │
+│ │  │  │                                                      │   │  │   │
+│ │  │  └────────────────────┬─────────────────────────────┘   │  │   │
+│ │  │                       │                                  │  │   │
+│ │  │  ┌────────────────────▼─────────────────────────────┐   │  │   │
+│ │  │  │ Private Subnet - DB (10.1.2.0/24)                 │   │  │   │
+│ │  │  │                                                      │   │  │   │
+│ │  │  │  ┌─────────────────────────────────┐               │   │  │   │
+│ │  │  │  │  RDS PostgreSQL (Multi-AZ本番)  │               │   │  │   │
+│ │  │  │  │  （3サービス共有）                │               │   │  │   │
+│ │  │  │  └─────────────────────────────────┘               │   │  │   │
+│ │  │  └──────────────────────────────────────────────────┘   │  │   │
+│ │  └──────────────────────────────────────────────────────────┘  │   │
+│ │                                                                 │   │
+│ │  ┌──────────────────────────────────────────────────────────┐  │   │
+│ │  │ その他のAWSサービス                                        │  │   │
+│ │  │ - ECR（コンテナイメージ）                                  │  │   │
+│ │  │ - Cognito User Pool（認証）                               │  │   │
+│ │  │ - S3（ファイル保存）                                       │  │   │
+│ │  │ - Secrets Manager（DB接続情報）                            │  │   │
+│ │  │ - CloudWatch（監視：Alarms + Dashboard）                  │  │   │
+│ │  │ - SNS（アラート通知: Critical/Warning）                    │  │   │
+│ │  └──────────────────────────────────────────────────────────┘  │   │
+│ └─────────────────────────────────────────────────────────────────┘   │
+└────────────────────────────────────────────────────────────────────────┘
 
-        ▲                           ▲
-        │                           │
-   Client VPN                   HTTPS（インターネット）
-   （市職員）                     （介護事業者）
+         ▲                                    ▲
+         │                                    │
+    Client VPN                           HTTPS（インターネット）
+    （市職員 - Admin Service）            （住民 - Public Service）
 ```
 
 ### 2.2 採用アーキテクチャ
 
-**Hub-and-Spoke型ネットワーク**
+**Multi-Account + Hub-and-Spoke型ネットワーク**
 
-- **Hub**: Shared VPC（Transit Gateway、Client VPN配置）
-- **Spoke**: App VPC（アプリケーション配置）
+- **Platform Account（Hub）**: Shared VPC（Transit Gateway、Client VPN配置）
+- **Service Account（Spoke）**: Service VPC（3サービス構成のアプリケーション配置）
 - **接続**: Transit Gateway経由で相互通信
 
 **選定理由:**
-- 将来的に複数のApp VPC追加が容易（スケーラブル）
-- ネットワーク管理の集中化
-- セキュリティ境界の明確化
+- AWSアカウント分離によるセキュリティ境界の明確化
+- 将来的に複数のService VPC追加が容易（スケーラブル）
+- ネットワーク管理の集中化（Platform Accountで一元管理）
+- 3サービス（Public/Admin/Batch）のマイクロサービス構成
+
+**3サービス構成:**
+- **Public Service**: 住民向けパブリックサービス（インターネット経由、ALB公開）
+- **Admin Service**: 自治体職員向け業務システム（VPN経由のみアクセス）
+- **Batch Service**: データ変換・バッチ処理（スケジュール実行）
 
 ---
 
@@ -104,13 +130,13 @@
 | **サブネット** | なし（VPC自体はAttachment用） |
 | **リージョン** | ap-northeast-1 |
 
-#### 3.1.2 App VPC
+#### 3.1.2 Service VPC
 
 | 項目 | 値 |
 |-----|---|
 | **CIDR** | 10.1.0.0/16 |
-| **用途** | アプリケーション本体 |
-| **AZ** | ap-northeast-1a（Single-AZ） |
+| **用途** | 業務アプリケーション（3サービス: Public/Admin/Batch） |
+| **AZ** | ap-northeast-1a（POC: Single-AZ、本番: Multi-AZ） |
 | **リージョン** | ap-northeast-1 |
 
 **サブネット構成:**
@@ -376,14 +402,41 @@
 
 ### 8.2 CloudWatch Alarms
 
+**SNS Topics:**
+| Topic名 | 用途 | サブスクリプション |
+|---------|-----|------------------|
+| CriticalAlertTopic | 即時対応が必要なアラート | Email, Slack（将来） |
+| WarningAlertTopic | 監視が必要なアラート | Email |
+
+**Alarms一覧:**
 | アラーム名 | メトリクス | 条件 | アクション |
 |----------|----------|-----|----------|
-| ECS-HighCPU | ECS CPU使用率 | > 80%（5分） | SNS通知 |
-| RDS-HighCPU | RDS CPU使用率 | > 80%（5分） | SNS通知 |
-| ALB-High5xxError | ALB 5xxエラー率 | > 5%（5分） | SNS通知 |
-| RDS-LowStorage | RDS空きストレージ | < 20% | SNS通知 |
+| **ECS監視** ||||
+| ECS-CPU-High | ECS CPU使用率 | > 80%（5分） | Critical SNS通知 |
+| ECS-Memory-High | ECS メモリ使用率 | > 80%（5分） | Critical SNS通知 |
+| ECS-RunningTaskCount | ECS タスク数 | < 1（5分） | Critical SNS通知 |
+| **RDS監視** ||||
+| RDS-CPU-High | RDS CPU使用率 | > 80%（5分） | Critical SNS通知 |
+| RDS-DatabaseConnections | RDS 接続数 | > 80%上限（5分） | Critical SNS通知 |
+| RDS-FreeStorageSpace | RDS 空きストレージ | < 20% | Critical SNS通知 |
+| RDS-ReplicaLag | RDS レプリカラグ | > 100ms（5分） | Warning SNS通知 |
+| **ALB監視** ||||
+| ALB-UnhealthyHostCount | ALB ターゲット異常 | > 0（1分） | Critical SNS通知 |
+| ALB-HTTPCode5XX | ALB 5xxエラー率 | > 5%（5分） | Critical SNS通知 |
+| ALB-TargetResponseTime | ALB レスポンスタイム | > 1秒（5分） | Warning SNS通知 |
 
-### 8.3 CloudTrail
+### 8.3 CloudWatch Dashboard
+
+**ダッシュボード名:** `CareApp-POC-Dashboard`
+
+**表示内容:**
+- ECS CPU/メモリ使用率（サービス別: Public/Admin/Batch）
+- ECS タスク数
+- RDS CPU/接続数/ストレージ使用量
+- ALB リクエスト数/レスポンスタイム/エラー率
+- アラーム状態の一覧表示
+
+### 8.4 CloudTrail
 
 **POC環境:**
 - 有効化（推奨）
@@ -482,35 +535,66 @@
 
 ### 10.1 CloudFormation スタック構成
 
-**Cross-Stack References方式を採用**
+**スタック分割構成 + Cross-Stack References方式を採用**
 
+**Platform Account:**
 ```
-1. CareApp-POC-SharedNetwork
-   ├── Shared VPC
-   ├── Transit Gateway
-   └── Client VPN
+infra/platform/
+├── network.yaml（CareApp-POC-Platform-Network）
+│   ├── Shared VPC
+│   ├── Transit Gateway
+│   └── Client VPN
+├── parameters-poc.json
+└── deploy.ps1
+```
 
-2. CareApp-POC-AppNetwork（依存: SharedNetwork）
-   ├── App VPC
-   ├── サブネット
-   ├── ALB
-   └── セキュリティグループ
-
-3. CareApp-POC-Database（依存: AppNetwork）
-   ├── RDS PostgreSQL
-   └── Secrets Manager
-
-4. CareApp-POC-AppPlatform（依存: AppNetwork, Database）
-   ├── ECS Cluster
-   ├── ECR
-   ├── Cognito
-   └── S3
+**Service Account:**
+```
+infra/service/
+├── 01-network.yaml（CareApp-POC-Network）
+│   ├── Service VPC
+│   ├── Subnets（Public/Private-App/Private-DB）
+│   ├── Route Tables
+│   ├── Transit Gateway Attachment
+│   └── Security Groups（ALB/ECS/RDS）
+│
+├── 02-database.yaml（CareApp-POC-Database）
+│   ├── RDS PostgreSQL
+│   ├── DB Subnet Group
+│   └── Secrets Manager
+│
+├── 03-compute.yaml（CareApp-POC-Compute）
+│   ├── ECS Cluster
+│   ├── ECS Task Definitions（Public/Admin/Batch）
+│   ├── ECS Services（Public/Admin/Batch）
+│   ├── Application Load Balancer
+│   ├── Target Groups
+│   ├── ECR Repositories
+│   └── Cognito User Pool
+│
+├── 04-monitoring.yaml（CareApp-POC-Monitoring）
+│   ├── CloudWatch Alarms（ECS/RDS/ALB）
+│   ├── SNS Topics（Critical/Warning）
+│   └── CloudWatch Dashboard
+│
+├── monitoring/（将来のネストスタック用ディレクトリ）
+├── parameters-*.json（各スタック用）
+└── deploy.ps1（dry-run対応）
 ```
 
 **デプロイ順序:**
 ```
-SharedNetwork → AppNetwork → (Database & AppPlatform 並列実行可能)
+[Platform Account]
+  Platform Network
+
+[Service Account]
+  01-Network → 02-Database → 03-Compute → 04-Monitoring
 ```
+
+**スタック間の依存関係（Cross-Stack References）:**
+- 02-Database: 01-Networkのサブネット・SGをImport
+- 03-Compute: 01-Networkのサブネット・SG、02-DatabaseのエンドポイントをImport
+- 04-Monitoring: 03-ComputeのECSサービス、02-DatabaseのRDS IDをImport
 
 ### 10.2 CI/CD（将来対応）
 
@@ -543,6 +627,17 @@ SharedNetwork → AppNetwork → (Database & AppPlatform 並列実行可能)
 
 ---
 
+## 12. 関連ドキュメント
+
+- [01_CareApp企画書.md](01_CareApp企画書.md)
+- [02_CareApp要件定義書.md](02_CareApp要件定義書.md)
+- [03_データモデル設計.md](03_データモデル設計.md)
+- [../DEPLOYMENT.md](../DEPLOYMENT.md) - デプロイ手順書
+- [../REFACTORING.md](../REFACTORING.md) - リファクタリングレポート
+
+---
+
 **作成日**: 2025-10-03
+**更新日**: 2025-10-08（Multi-Account構成、3サービスアーキテクチャ、スタック分割、監視強化を反映）
 **承認者**: （承認後に記入）
 **承認日**: （承認後に記入）

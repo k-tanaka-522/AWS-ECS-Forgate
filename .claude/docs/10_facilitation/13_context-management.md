@@ -230,6 +230,54 @@ AI: Terraformでお願いします
 
 ---
 
+#### プロジェクトタイプ別の技術標準読み込み
+
+**インフラプロジェクト（AWS IaC）の場合：**
+
+```
+【プロジェクトタイプ判明時】
+- プロジェクトタイプが "infrastructure" または IaC構築と判明
+  ↓
+- `.claude/docs/40_standards/42_infrastructure.md` を読み込む
+- 特に以下を確認：
+  - セクション1.2: CloudFormation日本語制約
+  - セクション8: 開発ワークフロー
+
+【コード生成直前（重要！）】
+- CloudFormation/Terraformコードを生成する直前
+  ↓
+- `.claude/docs/40_standards/42_infrastructure.md` を**再読み込み**
+- 理由：長い会話で制約を忘れないため
+- 確認項目：
+  - 日本語制約（論理ID、パラメータ名は英数字のみ）
+  - DependsOn の必要性
+  - 開発ワークフロー（小さく始めて段階的に）
+```
+
+**アプリケーションプロジェクトの場合（Phase 2以降）：**
+
+```
+【プロジェクトタイプ判明時】
+- プロジェクトタイプが "application" と判明
+  ↓
+- `.claude/docs/40_standards/43_application.md` を読み込む（将来実装）
+
+【コード生成直前】
+- アプリケーションコードを生成する直前
+  ↓
+- 該当する技術標準を再読み込み
+```
+
+**共通標準（全プロジェクト）：**
+
+```
+【シークレット管理が必要な時】
+- `.claude/docs/40_standards/45_secrets-management.md` を読み込む
+- 環境変数、AWS Secrets Manager、.gitignore等の確認
+```
+
+---
+
 ## 7. 状態ファイルの管理
 
 ### project-state.json の更新頻度

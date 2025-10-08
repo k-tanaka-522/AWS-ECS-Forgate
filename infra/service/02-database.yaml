@@ -1,0 +1,131 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CareApp Service - Database Stack (RDS PostgreSQL)'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: POC
+    AllowedValues:
+      - POC
+      - Production
+    Description: Environment name
+
+  ProjectName:
+    Type: String
+    Default: CareApp
+    Description: Project name for resource naming
+
+  NetworkStackName:
+    Type: String
+    Description: Name of the network stack to import values from
+
+  DBMasterUsername:
+    Type: String
+    Default: postgres
+    NoEcho: true
+    Description: Master username for RDS
+
+  DBMasterPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 8
+    Description: Master password for RDS (minimum 8 characters)
+
+  DBInstanceClass:
+    Type: String
+    Default: db.t3.micro
+    AllowedValues:
+      - db.t3.micro
+      - db.t3.small
+      - db.t3.medium
+    Description: RDS instance class
+
+  AllocatedStorage:
+    Type: Number
+    Default: 20
+    MinValue: 20
+    MaxValue: 100
+    Description: Allocated storage in GB
+
+Resources:
+  # ========================================
+  # RDS Subnet Group
+  # ========================================
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupName: !Sub '${ProjectName}-${Environment}-DBSubnetGroup'
+      DBSubnetGroupDescription: Subnet group for RDS PostgreSQL
+      SubnetIds:
+        - Fn::ImportValue: !Sub '${NetworkStackName}-Subnet-DB-AZ1'
+        - Fn::ImportValue: !Sub '${NetworkStackName}-Subnet-DB-AZ2'
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-DBSubnetGroup'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ========================================
+  # RDS PostgreSQL Instance
+  # ========================================
+  RDSInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier: !Sub '${ProjectName}-${Environment}-DB'
+      Engine: postgres
+      EngineVersion: '15.14'
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: !Ref AllocatedStorage
+      StorageType: gp3
+      MasterUsername: !Ref DBMasterUsername
+      MasterUserPassword: !Ref DBMasterPassword
+      DBName: careapp
+      VPCSecurityGroups:
+        - Fn::ImportValue: !Sub '${NetworkStackName}-SG-RDS'
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      PubliclyAccessible: false
+      BackupRetentionPeriod: 7
+      PreferredBackupWindow: '02:00-03:00'
+      PreferredMaintenanceWindow: 'sun:03:00-sun:04:00'
+      EnableCloudwatchLogsExports:
+        - postgresql
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-DB'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+Outputs:
+  DBInstanceId:
+    Description: RDS Instance ID
+    Value: !Ref RDSInstance
+    Export:
+      Name: !Sub '${AWS::StackName}-DB-InstanceID'
+
+  DBEndpoint:
+    Description: RDS Endpoint Address
+    Value: !GetAtt RDSInstance.Endpoint.Address
+    Export:
+      Name: !Sub '${AWS::StackName}-DB-Endpoint'
+
+  DBPort:
+    Description: RDS Port
+    Value: !GetAtt RDSInstance.Endpoint.Port
+    Export:
+      Name: !Sub '${AWS::StackName}-DB-Port'
+
+  DBName:
+    Description: Database Name
+    Value: careapp
+    Export:
+      Name: !Sub '${AWS::StackName}-DB-Name'

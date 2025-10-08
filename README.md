@@ -1,278 +1,325 @@
-# AI Development Facilitator
+# AWS Multi-Account サンプルアプリケーション
 
-**Claude Code環境専用**のAI開発ファシリテーターです。AIとの対話を通じてシステム開発プロセス全体を支援します。
+AWS上で動作するエンタープライズ向けマルチアカウント構成のサンプルインフラストラクチャとアプリケーションです。
 
 ## 概要
 
-このプロジェクトは、**VSCode + Claude Code拡張機能**上で動作するAIファシリテーターです。エンジニアから非エンジニアまで、誰でも自然言語での会話を通じてシステム開発を進められます。企画から要件定義、設計、実装、テスト、デプロイまでの全フェーズをサポートし、納品レベルのドキュメントとコードを生成します。
+このプロジェクトは、**AWS技術の学習・検証用**および**社内向け技術デモ・PoC**を目的としたサンプルアプリケーションです。Multi-Account構成、Transit Gateway、ECS Fargate、RDS等の主要なAWSサービスを組み合わせた実践的な構成を提供します。
 
-### 前提条件
+### システム構成
 
-- **VSCode** がインストールされていること
-- **Claude Code拡張機能** がインストールされていること
-- Git がインストールされていること（Windows Git Bashを推奨）
+- **Platform Account（共通基盤）**: Shared VPC、Transit Gateway、Client VPN/Direct Connect
+- **Service Account（アプリケーション）**: 3サービス構成
+  - **Public Service**: 一般ユーザー向けWebアプリケーション（インターネット公開）
+  - **Admin Service**: 管理者向けダッシュボード（VPN/Direct Connect経由）
+  - **Batch Service**: データ処理・集計バッチ
 
-### 主な特徴
+### 技術スタック
 
-- **対話型開発プロセス**: 一問一答形式で段階的に情報を収集
-- **フェーズ管理**: 企画→要件定義→設計→実装→テスト→デプロイの各フェーズをガイド
-- **ドキュメント自動生成**: 各フェーズで必要なドキュメントを日本語で生成
-- **技術標準の適用**: コード品質、安全性、一貫性を保証する標準を自動適用
-- **ビジュアル対応**: Mermaid図などを使った視覚的なドキュメント
-- **状態管理**: プロジェクトの進捗、タスク、決定事項を自動追跡
+- **インフラ**: AWS CloudFormation（Multi-Account構成）
+- **コンピューティング**: ECS Fargate（3サービス）
+- **データベース**: RDS PostgreSQL（Multi-AZ本番）
+- **監視**: CloudWatch（Alarms + Dashboard + SNS）
+- **アプリケーション**: Node.js 20、Monorepo（npm workspaces）
 
-## クイックスタート
+---
 
-### パターンA: 新規プロジェクトとして開始
-
-```bash
-git clone https://github.com/k-tanaka-522/aidev.git my-project
-cd my-project
-code .
-```
-
-VSCode + Claude Code拡張機能でこのディレクトリを開くだけで、自動的に`.claude`設定が読み込まれます。
-
-### パターンB: 既存プロジェクトに追加
-
-既存のプロジェクトに `.claude/` 設定のみを追加する場合：
-
-```bash
-cd your-existing-project
-
-# 一時的にclone
-git clone https://github.com/k-tanaka-522/aidev.git .aidev-temp
-
-# .claude/ ディレクトリをコピー
-cp -r .aidev-temp/.claude .
-
-# .gitignore をマージ（既存の.gitignoreがある場合は手動で調整）
-cat .aidev-temp/.gitignore >> .gitignore
-
-# 一時ディレクトリを削除
-rm -rf .aidev-temp
-
-# VSCodeで開く（既に開いている場合は再読み込み）
-code .
-```
-
-### 開発を開始
-
-Claude Codeとの会話を始めてください：
-
-```
-新しいAWS環境を構築したいです
-```
-
-AIが自動的に以下を行います：
-- 業種・業態・課題などビジネス背景をヒアリング
-- 要件を整理して要件定義書を作成
-- 設計を行い、設計書とMermaid図を生成
-- IaCコード（Terraform/CloudFormation）を生成
-- CI/CDパイプラインを設計・実装
-
-## ディレクトリ構造
+## プロジェクト構成
 
 ```
 .
-├── .claude/                    # Claude Code設定
-│   ├── CLAUDE.md              # エントリーポイント
-│   ├── commands/              # カスタムコマンド
-│   │   ├── status.md         # /status - プロジェクト状況確認
-│   │   └── next.md           # /next - 次のアクション提案
-│   └── docs/
-│       ├── 00_core-principles.md          # 核となる行動原則
-│       ├── 10_facilitation/
-│       │   ├── 11_decision-items.md      # フェーズごとの決定項目
-│       │   ├── 12_phase-transition.md    # フェーズ遷移ルール
-│       │   └── 13_context-management.md  # コンテキスト管理戦略
-│       └── 40_standards/
-│           ├── 41_common.md              # 共通技術標準
-│           └── 42_infrastructure.md      # インフラ技術標準
-│
-├── .claude-state/              # プロジェクト状態（.gitignoreで除外）
-│   ├── project-state.json     # プロジェクト状態
-│   ├── tasks.json             # タスク管理
-│   └── decisions.json         # 決定記録
-│
-├── docs/                       # 生成されるドキュメント
+├── .claude/              # AI開発ファシリテーター設定
+│   ├── commands/         # カスタムコマンド (/status, /next等)
+│   └── docs/             # 原則・ガイド・標準
+├── .claude-state/        # プロジェクト状態 (Git管理外)
+├── docs/                 # プロジェクトドキュメント
 │   ├── 01_企画書.md
 │   ├── 02_要件定義書.md
 │   └── 03_設計書.md
-│
-└── README.md                   # このファイル
+├── infra/                # AWS Infrastructure (CloudFormation)
+│   ├── platform/         # Platform Account - 共通基盤
+│   │   ├── network.yaml  # Shared VPC, Transit Gateway, Client VPN
+│   │   ├── parameters-poc.json
+│   │   └── deploy.ps1
+│   └── service/          # Service Account - 業務アプリケーション
+│       ├── 01-network.yaml       # Service VPC, Subnets, Security Groups
+│       ├── 02-database.yaml      # RDS PostgreSQL (Multi-AZ)
+│       ├── 03-compute.yaml       # ECS Fargate, ALB
+│       ├── 04-monitoring.yaml    # CloudWatch Alarms & Dashboard
+│       ├── monitoring/           # 監視ネストスタック (将来拡張用)
+│       ├── parameters-network-poc.json
+│       ├── parameters-database-poc.json
+│       ├── parameters-compute-poc.json
+│       ├── parameters-monitoring-poc.json
+│       └── deploy.ps1            # デプロイスクリプト (dry-run対応)
+└── app/                  # アプリケーション Monorepo (npm workspaces)
+    ├── public/           # 一般ユーザー向けWebアプリケーション
+    │   ├── src/          # Node.js アプリ (Hello ECS デモ)
+    │   ├── db/           # DB初期化スクリプト
+    │   ├── package.json
+    │   └── Dockerfile
+    ├── admin/            # 管理者向けダッシュボード (VPN/Direct Connect経由)
+    │   ├── package.json
+    │   ├── Dockerfile
+    │   └── README.md
+    ├── batch/            # データ処理・集計バッチ
+    │   ├── package.json
+    │   ├── Dockerfile
+    │   └── README.md
+    ├── shared/           # 共通ライブラリ (DB接続、ユーティリティ等)
+    │   ├── package.json
+    │   └── README.md
+    └── package.json      # Monorepo root設定
 ```
 
-## 使い方
+---
 
-### 基本的な対話の流れ
+## クイックスタート
 
-1. **プロジェクト開始**
-   ```
-   AWSでWebアプリケーション環境を構築したいです
-   ```
+### 前提条件
 
-2. **AIが質問してくる（一問一答）**
-   ```
-   AI: どのような業種・業態のビジネスですか？
-   ```
+- AWS CLI v2以上
+- PowerShell 7+（Windows）または Bash（macOS/Linux）
+- Docker v20以上
+- Git
 
-3. **あなたが回答**
-   ```
-   EC事業です。既存のオンプレミス環境からの移行です。
-   ```
+### デプロイ手順
 
-4. **AIが情報を整理してドキュメント生成**
-   - 会話を振り返り、抜け漏れチェック
-   - 「もっといい提案」があれば提示
-   - ユーザー確認後、次フェーズへ
+詳細は [DEPLOYMENT.md](DEPLOYMENT.md) を参照してください。
 
-### カスタムコマンド
+```powershell
+# 1. リポジトリのクローン
+git clone <repository-url>
+cd sampleAWS
 
-#### `/status` - プロジェクト状況確認
-```
-/status
-```
+# 2. パラメータファイルの編集
+cd infra/service
+# parameters-*.json を環境に合わせて編集
 
-現在のフェーズ、完了項目、進行中項目、次にやるべきことを表示します。
+# 3. インフラのデプロイ（dry-run）
+.\deploy.ps1 -DryRun
 
-#### `/next` - 次のアクション提案
-```
-/next
+# 4. インフラのデプロイ（本番）
+.\deploy.ps1
+
+# 5. アプリケーションのビルド＆デプロイ
+cd ..\..\app\public
+docker build -t careapp/public:latest .
+# ECRへpush（詳細はDEPLOYMENT.mdを参照）
 ```
 
-次に優先すべきアクションを1つ提案します。
+---
 
-### ユースケース例
+## 実装済み機能
 
-#### 1. 新規AWS環境構築
+### インフラストラクチャ
+- ✅ **Platform Account**: Shared VPC（Client VPN、Transit Gateway）
+- ✅ **Service Account**: Service VPC（マルチAZ構成）
+- ✅ **インフラ分割構成**:
+  - 01-network.yaml（VPC、サブネット、セキュリティグループ）
+  - 02-database.yaml（RDS PostgreSQL Multi-AZ）
+  - 03-compute.yaml（ECS Fargate、ALB）
+  - 04-monitoring.yaml（CloudWatch監視）
+- ✅ **CloudWatch統合監視**:
+  - 11種類のAlarms（ECS/RDS/ALB）
+  - SNS Topics（Critical/Warning）
+  - CloudWatch Dashboard
+- ✅ **dry-run対応デプロイスクリプト**
+
+### アプリケーション
+- ✅ **Monorepoアプリケーション構成**:
+  - public: 一般ユーザー向けWebアプリ（Hello ECSデモアプリ実装済み）
+  - admin: 管理者向けダッシュボード（VPN/Direct Connect経由、準備中）
+  - batch: データ処理・集計バッチ（準備中）
+  - shared: 共通ライブラリ（準備中）
+
+### ドキュメント
+- ✅ デプロイ手順書（[DEPLOYMENT.md](DEPLOYMENT.md)）
+- ✅ リファクタリングレポート（[REFACTORING.md](REFACTORING.md)）
+- ✅ 企画書・要件定義書・設計書（[docs/](docs/)）
+
+---
+
+## アーキテクチャ
+
+### Multi-Account構成
+
 ```
-新しいAWS環境にWebアプリケーションをデプロイしたいです。
+┌─────────────────────────────────────────────┐
+│ Platform Account（共通基盤）                  │
+│  - Shared VPC (10.0.0.0/16)                │
+│  - Transit Gateway                          │
+│  - Client VPN / Direct Connect             │
+└────────────┬────────────────────────────────┘
+             │ Transit Gateway
+┌────────────▼────────────────────────────────┐
+│ Service Account（アプリケーション）           │
+│  - Service VPC (10.1.0.0/16)               │
+│  - 3 ECS Services (Public/Admin/Batch)     │
+│  - RDS PostgreSQL (Multi-AZ)               │
+│  - CloudWatch監視                           │
+└─────────────────────────────────────────────┘
 ```
 
-→ AIがヒアリング → 要件定義 → 設計 → Terraform/CloudFormationコード生成 → CI/CD設定
+### CloudFormationスタック構成
 
-#### 2. 既存インフラの改修
+**デプロイ順序:**
 ```
-現在のAWS環境のコスト最適化をしたいです。
-```
+Platform Account:
+  └─ Platform-Network
 
-→ 現状分析 → 改善提案 → 設計変更 → IaC修正 → デプロイ戦略
-
-#### 3. マイグレーション
-```
-オンプレミスからAWSに移行したいです。
+Service Account:
+  └─ 01-Network → 02-Database → 03-Compute → 04-Monitoring
 ```
 
-→ 現行システム調査 → 移行戦略立案 → ターゲットアーキテクチャ設計 → 段階的移行計画
+### 技術的ポイント
 
-## AIの行動原則
+このサンプルの**最も重要な要素**は、**Transit Gatewayによる拠点間閉域接続**です：
 
-### 1. 一問一答
-複数の質問を同時にせず、1つずつ確認します。ユーザーが疲れないよう配慮します。
+- **オンプレミス拠点** → Direct Connect → **Platform Account**
+- **Platform Account** → Transit Gateway → **Service Account**
+- VPN経由での安全な拠点間通信を実現
 
-### 2. ビジネス背景優先
-技術的な質問の前に、必ず「なぜ」を理解します：
-- 業種・業態
-- 現在の課題
-- 開発・改修の理由
+詳細は [docs/03_設計書.md](docs/03_設計書.md) を参照してください。
 
-### 3. 確認前の振り返り
-ドキュメントを提示する前に、会話を振り返って：
-- 抜け漏れチェック
-- 矛盾の確認
-- より良い提案の検討
+---
 
-### 4. 安全性第一
-- 本番環境への直接操作は行わない
-- dry-run を必ず実施
-- セキュリティベストプラクティスを適用
-- シークレット情報はハードコードしない
+## 監視
 
-### 5. 教育的な説明
-コード生成時には、「なぜこの実装なのか」を説明し、ユーザーが学べるようにします。
+### CloudWatch Alarms
 
-## 技術標準
+- **ECS監視**: CPU使用率、メモリ使用率、タスク数
+- **RDS監視**: CPU使用率、接続数、ストレージ容量、レプリケーションラグ
+- **ALB監視**: ターゲット異常、5xxエラー率、レスポンスタイム
 
-### 共通標準（全技術領域）
-- 品質確保：保守可能なコード
-- 安全性確保：セキュリティリスク最小化
-- 一貫性維持：統一されたコーディング規約
-- ベストプラクティス適用
+### SNS通知
 
-### インフラ標準（AWS IaC）
-- モジュール構成
-- 環境分離（dev/stg/prod）
-- 命名規則
-- セキュリティ設定
-- コスト最適化
-- タグ戦略
+- **Critical**: 即時対応が必要なアラート
+- **Warning**: 監視が必要なアラート
 
-詳細は [.claude/docs/40_standards/](.claude/docs/40_standards/) を参照。
+### CloudWatch Dashboard
 
-## 対応する開発手法
+統合ダッシュボードで全サービスのメトリクスを一覧表示。
 
-- **ウォーターフォール**: 各フェーズを順番に完了
-- **アジャイル**: 小さい単位でイテレーション
-- **ハイブリッド**: 状況に応じて柔軟に対応
+---
 
-## 対応プロジェクトタイプ
+## 開発
 
-### 現在サポート（Phase 1）
-- AWS IaC構築・改修（Terraform/CloudFormation）
-- インフラアーキテクチャ設計
-- CI/CDパイプライン構築
+### Monorepo構成
 
-### 将来対応（Phase 2以降）
-- Webアプリケーション開発
-- データベース設計・実装
-- マイクロサービス構築
-- Slack/Notion連携
-- 自律的な運用監視・復旧
+このプロジェクトは npm workspaces を使用したMonorepo構成です。
+
+```bash
+# 全サービスの依存関係をインストール
+npm install
+
+# 全サービスをビルド
+npm run build:all
+
+# 特定のサービスで作業
+cd app/public
+npm run dev
+```
+
+### 共通ライブラリの使用
+
+```javascript
+// app/public/src/index.js
+import { connectDB } from '@sample/shared';
+
+const db = await connectDB();
+```
+
+---
+
+## コスト見積もり
+
+### POC環境（最小構成）
+- Platform Account: 約8,000円/月
+- Service Account: 約9,500円/月
+- **合計**: 約17,500円/月
+
+### 本番環境（大規模構成）
+- Platform Account: 約25,000円/月
+- Service Account: 約65,500円/月
+- **合計**: 約90,500円/月
+
+詳細は [docs/02_要件定義書.md](docs/02_要件定義書.md) を参照してください。
+
+---
+
+## セキュリティ
+
+### 機密情報管理
+
+**⚠️ 重要:**
+- パラメータファイル（`parameters-*.json`）はGitにコミットしない
+- DBパスワード等は AWS Secrets Manager を使用
+- 本番環境では必ずHTTPS（ACM証明書）を使用
+
+### アクセス制御
+
+- **Public Service**: インターネット公開（HTTPS）
+- **Admin Service**: VPN経由のみアクセス可能
+- **Batch Service**: 内部ネットワークのみ
+
+---
 
 ## トラブルシューティング
 
-### Claude Codeが設定を読み込まない
-- VSCodeを再起動してください
-- `.claude/CLAUDE.md`が存在するか確認してください
+### デプロイが失敗する
 
-### 状態がリセットされる
-- `.claude-state/`ディレクトリは`.gitignore`で除外されています
-- Git管理したい場合は、`.gitignore`から該当行を削除してください
+```powershell
+# テンプレート検証
+.\deploy.ps1 -DryRun
 
-### AIの応答が期待と異なる
-- `/status`コマンドで現在の状態を確認
-- `.claude/docs/00_core-principles.md`を確認して行動原則を理解
-- 具体的に「〇〇について確認してください」と指示
+# CloudFormationイベントログを確認
+aws cloudformation describe-stack-events `
+  --stack-name CareApp-POC-Network `
+  --max-items 20
+```
 
-## ロードマップ
+### ECSタスクが起動しない
 
-### Phase 1（現在）✅
-- ローカルClaude Code環境での動作
-- AWS IaC構築サポート
-- 基本的な開発フェーズ管理
+```powershell
+# ECS Serviceのイベントログを確認
+aws ecs describe-services `
+  --cluster CareApp-POC-ECSCluster-Main `
+  --services CareApp-POC-PublicService `
+  --query 'services[0].events[0:5]'
 
-### Phase 2（計画中）
-- MCP Server統合
-- Slack Bot連携（ユーザーがSlackから@AI呼び出し）
-- Notion連携（タスク・進捗・課題管理）
-- ステートレスコンテナ化（AWS ECS/Fargate）
-- S3/DynamoDBによる外部状態管理
+# CloudWatch Logsを確認
+aws logs tail /ecs/careapp-public --follow
+```
 
-### Phase 3（構想）
-- 24/7自律エージェント
-- 運用監視・自動復旧
-- マルチプロジェクト並行管理
-- GitHub連携強化
+### ALBヘルスチェックが失敗する
+
+- `/health` エンドポイントが正常に応答するか確認
+- セキュリティグループの設定を確認（ALB → ECS の通信許可）
+
+---
+
+## ドキュメント
+
+- [DEPLOYMENT.md](DEPLOYMENT.md) - デプロイ手順書
+- [REFACTORING.md](REFACTORING.md) - リファクタリングレポート
+- [docs/01_企画書.md](docs/01_企画書.md) - プロジェクト概要
+- [docs/02_要件定義書.md](docs/02_要件定義書.md) - 要件定義
+- [docs/03_設計書.md](docs/03_設計書.md) - 設計書
+
+---
 
 ## ライセンス
 
-（ここにライセンス情報を記載）
+（ライセンス情報を記載）
 
-## コントリビューション
+---
+
+## 貢献
 
 （コントリビューションガイドラインを記載）
 
-## サポート
+---
 
-質問や問題が発生した場合は、Issueを作成してください。
+**作成日**: 2025-09-30
+**最終更新**: 2025-10-09（汎用サンプルアプリケーション表記に変更）

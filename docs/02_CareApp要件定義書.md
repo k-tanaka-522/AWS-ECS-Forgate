@@ -10,9 +10,16 @@
 ### 1.2 対象システム
 **介護保険申請管理システム（PC Web版）- CareApp**
 
-### 1.3 スコープ
-- **Phase 1（本ドキュメント対象）**: POC環境構築
-- **Phase 2以降**: アプリケーション開発、本番環境構築
+### 1.3 システム構成
+- **Platform Account（共通基盤）**: Shared VPC、Transit Gateway、Client VPN
+- **Service Account（業務システム）**: 3サービス構成
+  - **Public Service**: 住民向けパブリックサービス（インターネット公開）
+  - **Admin Service**: 自治体職員向け業務システム（VPN経由）
+  - **Batch Service**: データ変換・バッチ処理
+
+### 1.4 スコープ
+- **Phase 1（本ドキュメント対象）**: POC環境構築（3サービスアーキテクチャ基盤）
+- **Phase 2以降**: 各サービスのアプリケーション開発、本番環境構築
 
 ---
 
@@ -251,10 +258,18 @@
 ### 4.5 運用・監視
 
 #### 4.5.1 監視項目
-**インフラメトリクス**:
-- ECS: CPU使用率、メモリ使用率、タスク数
-- RDS: CPU使用率、接続数、ストレージ使用量
-- ALB: リクエスト数、レイテンシ、エラー率
+**インフラメトリクス（サービス別）**:
+- **Public Service**:
+  - ECS: CPU使用率、メモリ使用率、タスク数
+  - ALB: リクエスト数、レイテンシ、エラー率、ターゲット正常性
+- **Admin Service**:
+  - ECS: CPU使用率、メモリ使用率、タスク数
+  - VPN接続状況
+- **Batch Service**:
+  - ECS: CPU使用率、メモリ使用率、タスク実行時間
+  - 失敗タスク数
+- **共通データベース**:
+  - RDS: CPU使用率、接続数、ストレージ使用量、レプリケーションラグ
 
 **アプリケーションメトリクス**:
 - エラーログ
@@ -267,18 +282,30 @@
 - 不正ログイン試行
 
 #### 4.5.2 アラート
-**通知先**:
-- Email: 運用チーム
-- Slack: 開発チーム（将来対応）
+**通知レベル**:
+- **Critical**: SNS Topic（CriticalAlerts）→ Email/Slack（即時対応）
+- **Warning**: SNS Topic（WarningAlerts）→ Email（監視）
 
 **アラート条件**:
-- ECS CPU使用率 > 80%（5分継続）
-- RDS CPU使用率 > 80%（5分継続）
-- ALB 5xxエラー率 > 5%（5分継続）
-- RDS接続数 > 80%上限
-- ディスク使用率 > 80%
+- **Critical**:
+  - ECS CPU使用率 > 80%（5分継続）
+  - ECS メモリ使用率 > 80%（5分継続）
+  - RDS CPU使用率 > 80%（5分継続）
+  - RDS 接続数 > 80%上限（5分継続）
+  - RDS ストレージ容量 > 80%（5分継続）
+  - ALB ターゲット異常検知（1分継続）
+  - ALB 5xxエラー率 > 5%（5分継続）
+- **Warning**:
+  - ALB レスポンスタイム > 1秒（5分継続）
+  - RDS レプリケーションラグ > 100ms（5分継続）
 
-#### 4.5.3 ログ管理
+#### 4.5.3 CloudWatch Dashboard
+**統合ダッシュボード**:
+- サービス別メトリクスの一覧表示
+- リアルタイムグラフ（CPU、メモリ、リクエスト数）
+- アラーム状態の可視化
+
+#### 4.5.4 ログ管理
 **CloudWatch Logs**:
 - ECSタスクログ
 - RDSクエリログ（スロークエリのみ）
@@ -290,7 +317,7 @@
 - 保管期間: 7年
 - ストレージクラス: Glacier
 
-#### 4.5.4 AI運用支援
+#### 4.5.5 AI運用支援
 **Amazon Bedrock**（将来対応）:
 - 異常検知時の原因分析
 - 対応策の提案
@@ -300,11 +327,12 @@
 ### 4.6 拡張性
 
 #### 4.6.1 スケーラビリティ
-**ECS Fargate Auto Scaling**:
-- Frontend: 2-6タスク（CPU 70%でスケールアウト）
-- Backend: 2-8タスク（CPU 70%でスケールアウト）
+**ECS Fargate Auto Scaling（サービス別）**:
+- **Public Service**: 2-6タスク（CPU 70%でスケールアウト）
+- **Admin Service**: 2-4タスク（CPU 70%でスケールアウト）
+- **Batch Service**: 1-4タスク（オンデマンド実行）
 
-**RDS**:
+**RDS（3サービス共有）**:
 - 初期: POC db.t3.micro、本番 db.m5.large
 - 拡張: 垂直スケーリング可能
 - リードレプリカ追加可能
@@ -341,33 +369,48 @@
 - デプロイ前にdry-run実施
 
 #### 4.7.3 IaC（Infrastructure as Code）
-- **ツール**: AWS CloudFormation（ネストスタック構成）
+- **ツール**: AWS CloudFormation（スタック分割構成）
+- **スタック構成**:
+  - **Platform Account**: network.yaml（Shared VPC、Transit Gateway、Client VPN）
+  - **Service Account**:
+    - 01-network.yaml（Service VPC、Subnets、Security Groups）
+    - 02-database.yaml（RDS PostgreSQL）
+    - 03-compute.yaml（ECS Fargate、ALB）
+    - 04-monitoring.yaml（CloudWatch Alarms、Dashboard）
 - **バージョン管理**: Git
 - **環境差分管理**: パラメータファイル（POC/本番）
+- **デプロイ**: PowerShellスクリプト（dry-run対応）
 
 ### 4.8 コスト
 
 #### 4.8.1 月額コスト見積もり
 
 **POC環境（最小構成）**:
-- ECS Fargate: 2,000円
-- RDS (db.t3.micro Single-AZ): 2,000円
-- ALB: 2,500円
-- Client VPN: 5,000円
-- その他（Cognito, CloudWatch等）: 1,000円
-- **合計**: 約12,500円/月
+- Platform Account:
+  - Transit Gateway: 3,000円
+  - Client VPN: 5,000円
+- Service Account:
+  - ECS Fargate (3サービス): 3,000円
+  - RDS (db.t3.micro Single-AZ): 2,000円
+  - ALB: 2,500円
+  - CloudWatch: 1,000円
+  - その他（Cognito等）: 1,000円
+- **合計**: 約17,500円/月
 
 **本番環境（大規模構成）**:
-- ECS Fargate (Auto Scaling): 15,000円
-- RDS (db.m5.large Multi-AZ): 30,000円
-- ALB: 2,500円
-- Direct Connect (共有): 10,000円（按分後）
-- Transit Gateway: 10,000円
-- WAF: 5,000円
-- S3 (バックアップ): 3,000円
-- CloudWatch Logs: 2,000円
-- その他: 2,000円
-- **合計**: 約70,000円/月
+- Platform Account:
+  - Transit Gateway: 10,000円
+  - Direct Connect (共有按分): 10,000円
+  - Client VPN: 5,000円
+- Service Account:
+  - ECS Fargate (3サービス、Auto Scaling): 20,000円
+  - RDS (db.m5.large Multi-AZ): 30,000円
+  - ALB: 2,500円
+  - WAF: 5,000円
+  - S3 (バックアップ): 3,000円
+  - CloudWatch (Logs + Alarms + Dashboard): 3,000円
+  - その他: 2,000円
+- **合計**: 約90,500円/月
 
 #### 4.8.2 コスト最適化
 - リザーブドインスタンス: RDSで1年契約（約30%削減）
@@ -406,10 +449,12 @@
 ## 6. 成功基準
 
 ### 6.1 POC環境（Phase 1）
-- Shared VPCとApp VPCがTransit Gatewayで接続できること
-- Client VPN経由でApp VPCのリソースにアクセスできること
-- ECS Fargateでアプリケーションが動作すること
-- RDS PostgreSQLにアプリから接続できること
+- Platform AccountとService AccountがTransit Gatewayで接続できること
+- Client VPN経由でService VPCのリソースにアクセスできること
+- 3サービス（Public/Admin/Batch）のECS基盤が構築されること
+- Public ServiceでHello ECSデモアプリが動作すること
+- RDS PostgreSQLに各サービスから接続できること
+- CloudWatch監視（Alarms + Dashboard）が機能すること
 - Cognito認証が機能すること
 
 ### 6.2 本番環境（Phase 4）
@@ -424,11 +469,14 @@
 
 - [01_CareApp企画書.md](01_CareApp企画書.md) - プロジェクト概要
 - [02_AWS構成図.md](02_AWS構成図.md) - AWS構成図（詳細）
+- [03_CareApp設計書.md](03_CareApp設計書.md) - 設計書（詳細）
 - [03_データモデル設計.md](03_データモデル設計.md) - データベース設計（詳細）
-- [infra/README.md](../infra/README.md) - インフラ構築手順
+- [../DEPLOYMENT.md](../DEPLOYMENT.md) - デプロイ手順書
+- [../REFACTORING.md](../REFACTORING.md) - リファクタリングレポート
 
 ---
 
 **作成日**: 2025-10-01
+**更新日**: 2025-10-08（3サービス構成、監視強化を反映）
 **承認者**: （承認後に記入）
 **承認日**: （承認後に記入）

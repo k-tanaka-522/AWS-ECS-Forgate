@@ -7,6 +7,12 @@
 .env
 .env.local
 .env.*.local
+!.env.example
+
+# CloudFormation パラメータファイル（機密情報含む）
+infra/**/parameters-*.json
+!infra/**/parameters-*.json.example
+**/secrets.tfvars
 
 # 依存関係
 node_modules/

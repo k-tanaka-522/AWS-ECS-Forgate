@@ -1,0 +1,311 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CareApp Service - Monitoring Stack (CloudWatch Alarms & Dashboard) - Parent Stack'
+
+Metadata:
+  Note: |
+    This is a simplified version for POC.
+    For production, use nested stacks with S3-hosted templates.
+
+    Nested stack structure (future):
+    - monitoring/sns-topics.yaml
+    - monitoring/alarms-ecs.yaml
+    - monitoring/alarms-rds.yaml
+    - monitoring/alarms-alb.yaml
+    - monitoring/dashboard.yaml
+
+Parameters:
+  Environment:
+    Type: String
+    Default: POC
+    AllowedValues:
+      - POC
+      - Production
+    Description: Environment name
+
+  ProjectName:
+    Type: String
+    Default: CareApp
+    Description: Project name for resource naming
+
+  ComputeStackName:
+    Type: String
+    Description: Name of the compute stack to import values from
+
+  DatabaseStackName:
+    Type: String
+    Description: Name of the database stack to import values from
+
+  AlertEmail:
+    Type: String
+    Description: Email address for alert notifications
+    AllowedPattern: ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$
+
+Resources:
+  # ========================================
+  # SNS Topic for Alerts
+  # ========================================
+  CriticalAlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub '${ProjectName}-${Environment}-Alert-Critical'
+      DisplayName: CareApp Critical Alerts
+      Subscription:
+        - Endpoint: !Ref AlertEmail
+          Protocol: email
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-SNS-Critical'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Severity
+          Value: Critical
+
+  WarningAlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub '${ProjectName}-${Environment}-Alert-Warning'
+      DisplayName: CareApp Warning Alerts
+      Subscription:
+        - Endpoint: !Ref AlertEmail
+          Protocol: email
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-SNS-Warning'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Severity
+          Value: Warning
+
+  # ========================================
+  # ECS Alarms
+  # ========================================
+  ECSCPUUtilizationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${ProjectName}-${Environment}-ECS-CPU-High'
+      AlarmDescription: ECS Service CPU utilization is too high
+      MetricName: CPUUtilization
+      Namespace: AWS/ECS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: ServiceName
+          Value:
+            Fn::ImportValue: !Sub '${ComputeStackName}-ECS-Service'
+        - Name: ClusterName
+          Value:
+            Fn::ImportValue: !Sub '${ComputeStackName}-ECS-Cluster'
+      AlarmActions:
+        - !Ref CriticalAlertTopic
+      TreatMissingData: notBreaching
+
+  ECSMemoryUtilizationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${ProjectName}-${Environment}-ECS-Memory-High'
+      AlarmDescription: ECS Service memory utilization is too high
+      MetricName: MemoryUtilization
+      Namespace: AWS/ECS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: ServiceName
+          Value:
+            Fn::ImportValue: !Sub '${ComputeStackName}-ECS-Service'
+        - Name: ClusterName
+          Value:
+            Fn::ImportValue: !Sub '${ComputeStackName}-ECS-Cluster'
+      AlarmActions:
+        - !Ref CriticalAlertTopic
+      TreatMissingData: notBreaching
+
+  # ========================================
+  # RDS Alarms
+  # ========================================
+  RDSCPUUtilizationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${ProjectName}-${Environment}-RDS-CPU-High'
+      AlarmDescription: RDS CPU utilization is too high
+      MetricName: CPUUtilization
+      Namespace: AWS/RDS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value:
+            Fn::ImportValue: !Sub '${DatabaseStackName}-DB-InstanceID'
+      AlarmActions:
+        - !Ref CriticalAlertTopic
+      TreatMissingData: notBreaching
+
+  RDSFreeStorageSpaceAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${ProjectName}-${Environment}-RDS-Storage-Low'
+      AlarmDescription: RDS free storage space is low
+      MetricName: FreeStorageSpace
+      Namespace: AWS/RDS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 2000000000  # 2GB in bytes
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value:
+            Fn::ImportValue: !Sub '${DatabaseStackName}-DB-InstanceID'
+      AlarmActions:
+        - !Ref WarningAlertTopic
+      TreatMissingData: notBreaching
+
+  RDSDatabaseConnectionsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${ProjectName}-${Environment}-RDS-Connections-High'
+      AlarmDescription: RDS database connections are high
+      MetricName: DatabaseConnections
+      Namespace: AWS/RDS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value:
+            Fn::ImportValue: !Sub '${DatabaseStackName}-DB-InstanceID'
+      AlarmActions:
+        - !Ref WarningAlertTopic
+      TreatMissingData: notBreaching
+
+  # ========================================
+  # ALB Alarms
+  # ========================================
+  ALBUnhealthyHostCountAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${ProjectName}-${Environment}-ALB-UnhealthyHosts'
+      AlarmDescription: ALB has unhealthy targets
+      MetricName: UnHealthyHostCount
+      Namespace: AWS/ApplicationELB
+      Statistic: Average
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !Select [1, !Split ['/', !Select [1, !Split [':',
+            Fn::ImportValue: !Sub '${ComputeStackName}-ALB-ARN']]]]
+        - Name: TargetGroup
+          Value: !Select [1, !Split [':',
+            Fn::ImportValue: !Sub '${ComputeStackName}-TG-ARN']]
+      AlarmActions:
+        - !Ref CriticalAlertTopic
+      TreatMissingData: notBreaching
+
+  ALBTargetResponseTimeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${ProjectName}-${Environment}-ALB-ResponseTime-High'
+      AlarmDescription: ALB target response time is too high
+      MetricName: TargetResponseTime
+      Namespace: AWS/ApplicationELB
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 2
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !Select [1, !Split ['/', !Select [1, !Split [':',
+            Fn::ImportValue: !Sub '${ComputeStackName}-ALB-ARN']]]]
+      AlarmActions:
+        - !Ref WarningAlertTopic
+      TreatMissingData: notBreaching
+
+  # ========================================
+  # CloudWatch Dashboard
+  # ========================================
+  MonitoringDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub '${ProjectName}-${Environment}-Dashboard'
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "properties": {
+                "metrics": [
+                  ["AWS/ECS", "CPUUtilization", {"stat": "Average"}],
+                  [".", "MemoryUtilization", {"stat": "Average"}]
+                ],
+                "period": 300,
+                "stat": "Average",
+                "region": "${AWS::Region}",
+                "title": "ECS CPU & Memory",
+                "yAxis": {"left": {"min": 0, "max": 100}}
+              }
+            },
+            {
+              "type": "metric",
+              "properties": {
+                "metrics": [
+                  ["AWS/RDS", "CPUUtilization", {"stat": "Average"}],
+                  [".", "DatabaseConnections", {"stat": "Average"}],
+                  [".", "FreeStorageSpace", {"stat": "Average"}]
+                ],
+                "period": 300,
+                "stat": "Average",
+                "region": "${AWS::Region}",
+                "title": "RDS Metrics"
+              }
+            },
+            {
+              "type": "metric",
+              "properties": {
+                "metrics": [
+                  ["AWS/ApplicationELB", "TargetResponseTime", {"stat": "Average"}],
+                  [".", "RequestCount", {"stat": "Sum"}],
+                  [".", "HTTPCode_Target_5XX_Count", {"stat": "Sum"}]
+                ],
+                "period": 300,
+                "stat": "Average",
+                "region": "${AWS::Region}",
+                "title": "ALB Metrics"
+              }
+            }
+          ]
+        }
+
+Outputs:
+  CriticalAlertTopicArn:
+    Description: Critical Alert SNS Topic ARN
+    Value: !Ref CriticalAlertTopic
+    Export:
+      Name: !Sub '${AWS::StackName}-SNS-Critical'
+
+  WarningAlertTopicArn:
+    Description: Warning Alert SNS Topic ARN
+    Value: !Ref WarningAlertTopic
+    Export:
+      Name: !Sub '${AWS::StackName}-SNS-Warning'
+
+  DashboardURL:
+    Description: CloudWatch Dashboard URL
+    Value: !Sub 'https://console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=${MonitoringDashboard}'
