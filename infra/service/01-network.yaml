@@ -1,199 +1,308 @@
+# ==============================================================================
+# Service Account - 01 Network Stack
+# ==============================================================================
+# 目的: Service Account VPCとTransit Gateway接続を構築
+# 構成: VPC, Subnets (Public x2, Private x2, Database x2), Transit Gateway Attachment
+# 設計: Multi-AZ構成、Transit Gateway経由でPlatform VPCと接続
+# デプロイ順序: 1番目
+# ==============================================================================
+
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'CareApp Service - Network Stack (VPC, Subnets, TGW Attachment)'
+Description: 'Service Account Network Stack - VPC with Transit Gateway connectivity'
 
+# ==============================================================================
+# Parameters
+# ==============================================================================
 Parameters:
-  Environment:
-    Type: String
-    Default: POC
-    AllowedValues:
-      - POC
-      - Production
-    Description: Environment name
-
   ProjectName:
     Type: String
-    Default: CareApp
+    Default: myapp
     Description: Project name for resource naming
+    AllowedPattern: ^[a-z][a-z0-9-]*$
 
-  VpcCIDR:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - prod
+    Description: Environment name (dev or prod)
+
+  VpcCidr:
     Type: String
     Default: 10.1.0.0/16
     Description: CIDR block for Service VPC
+    AllowedPattern: ^(10\.\d{1,3}\.\d{1,3}\.\d{1,3}/16)$
+
+  PlatformVpcCidr:
+    Type: String
+    Default: 10.0.0.0/16
+    Description: CIDR block for Platform VPC (for routing)
 
   TransitGatewayId:
     Type: String
-    Description: Transit Gateway ID from platform account
+    Description: Transit Gateway ID (shared from Platform Account via RAM)
+    AllowedPattern: ^tgw-[a-f0-9]{17}$
 
-  PlatformVpcCIDR:
+  TransitGatewayRouteTableId:
     Type: String
-    Default: 10.0.0.0/16
-    Description: Platform VPC CIDR for routing
+    Description: Transit Gateway Route Table ID (from Platform Account)
+    AllowedPattern: ^tgw-rtb-[a-f0-9]{17}$
 
+# ==============================================================================
+# Metadata
+# ==============================================================================
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "Project Configuration"
+        Parameters:
+          - ProjectName
+          - Environment
+      - Label:
+          default: "Network Configuration"
+        Parameters:
+          - VpcCidr
+          - PlatformVpcCidr
+      - Label:
+          default: "Transit Gateway Configuration"
+        Parameters:
+          - TransitGatewayId
+          - TransitGatewayRouteTableId
+
+# ==============================================================================
+# Resources
+# ==============================================================================
 Resources:
-  # ========================================
+  # ----------------------------------------------------------------------------
   # VPC
-  # ========================================
-  VPC:
+  # ----------------------------------------------------------------------------
+  ServiceVPC:
     Type: AWS::EC2::VPC
     Properties:
-      CidrBlock: !Ref VpcCIDR
+      CidrBlock: !Ref VpcCidr
       EnableDnsHostnames: true
       EnableDnsSupport: true
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-${Environment}-VPC-Service'
-        - Key: Project
-          Value: !Ref ProjectName
+          Value: !Sub ${ProjectName}-${Environment}-service-vpc
         - Key: Environment
           Value: !Ref Environment
-        - Key: ManagedBy
-          Value: CloudFormation
+        - Key: Purpose
+          Value: Service Account Application VPC
 
+  # ----------------------------------------------------------------------------
+  # Internet Gateway
+  # 設計: Public Subnetのインターネット接続用
+  # ----------------------------------------------------------------------------
   InternetGateway:
     Type: AWS::EC2::InternetGateway
     Properties:
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-${Environment}-IGW'
-        - Key: Project
-          Value: !Ref ProjectName
+          Value: !Sub ${ProjectName}-${Environment}-service-igw
         - Key: Environment
           Value: !Ref Environment
 
   AttachGateway:
     Type: AWS::EC2::VPCGatewayAttachment
     Properties:
-      VpcId: !Ref VPC
+      VpcId: !Ref ServiceVPC
       InternetGatewayId: !Ref InternetGateway
 
-  # ========================================
-  # Public Subnets (for ALB)
-  # ========================================
-  PublicSubnetAZ1:
+  # ----------------------------------------------------------------------------
+  # Subnets - Public (Multi-AZ)
+  # 設計: ALB配置用、NAT Gateway配置用
+  # ----------------------------------------------------------------------------
+  PublicSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
-      VpcId: !Ref VPC
-      CidrBlock: 10.1.1.0/24
+      VpcId: !Ref ServiceVPC
+      CidrBlock: !Select [0, !Cidr [!Ref VpcCidr, 6, 8]]  # 10.1.0.0/24
       AvailabilityZone: !Select [0, !GetAZs '']
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-${Environment}-Subnet-Public-AZ1'
-        - Key: Project
-          Value: !Ref ProjectName
+          Value: !Sub ${ProjectName}-${Environment}-service-public-subnet-1
         - Key: Environment
           Value: !Ref Environment
+        - Key: Tier
+          Value: Public
 
-  PublicSubnetAZ2:
+  PublicSubnet2:
     Type: AWS::EC2::Subnet
     Properties:
-      VpcId: !Ref VPC
-      CidrBlock: 10.1.2.0/24
+      VpcId: !Ref ServiceVPC
+      CidrBlock: !Select [1, !Cidr [!Ref VpcCidr, 6, 8]]  # 10.1.1.0/24
       AvailabilityZone: !Select [1, !GetAZs '']
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-${Environment}-Subnet-Public-AZ2'
-        - Key: Project
-          Value: !Ref ProjectName
+          Value: !Sub ${ProjectName}-${Environment}-service-public-subnet-2
         - Key: Environment
           Value: !Ref Environment
+        - Key: Tier
+          Value: Public
 
-  # ========================================
-  # Private Subnets (for ECS)
-  # ========================================
-  PrivateSubnetAppAZ1:
+  # ----------------------------------------------------------------------------
+  # Subnets - Private (Multi-AZ)
+  # 設計: ECS Fargate タスク配置用
+  # ----------------------------------------------------------------------------
+  PrivateSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
-      VpcId: !Ref VPC
-      CidrBlock: 10.1.11.0/24
+      VpcId: !Ref ServiceVPC
+      CidrBlock: !Select [2, !Cidr [!Ref VpcCidr, 6, 8]]  # 10.1.2.0/24
       AvailabilityZone: !Select [0, !GetAZs '']
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-${Environment}-Subnet-App-AZ1'
-        - Key: Project
-          Value: !Ref ProjectName
+          Value: !Sub ${ProjectName}-${Environment}-service-private-subnet-1
         - Key: Environment
           Value: !Ref Environment
+        - Key: Tier
+          Value: Private
 
-  PrivateSubnetAppAZ2:
+  PrivateSubnet2:
     Type: AWS::EC2::Subnet
     Properties:
-      VpcId: !Ref VPC
-      CidrBlock: 10.1.12.0/24
+      VpcId: !Ref ServiceVPC
+      CidrBlock: !Select [3, !Cidr [!Ref VpcCidr, 6, 8]]  # 10.1.3.0/24
       AvailabilityZone: !Select [1, !GetAZs '']
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-${Environment}-Subnet-App-AZ2'
-        - Key: Project
-          Value: !Ref ProjectName
+          Value: !Sub ${ProjectName}-${Environment}-service-private-subnet-2
         - Key: Environment
           Value: !Ref Environment
+        - Key: Tier
+          Value: Private
 
-  # ========================================
-  # Private Subnets (for RDS)
-  # ========================================
-  PrivateSubnetDBAZ1:
+  # ----------------------------------------------------------------------------
+  # Subnets - Database (Multi-AZ)
+  # 設計: RDS PostgreSQL配置用（独立サブネット）
+  # ----------------------------------------------------------------------------
+  DatabaseSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
-      VpcId: !Ref VPC
-      CidrBlock: 10.1.21.0/24
+      VpcId: !Ref ServiceVPC
+      CidrBlock: !Select [4, !Cidr [!Ref VpcCidr, 6, 8]]  # 10.1.4.0/24
       AvailabilityZone: !Select [0, !GetAZs '']
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-${Environment}-Subnet-DB-AZ1'
-        - Key: Project
-          Value: !Ref ProjectName
+          Value: !Sub ${ProjectName}-${Environment}-service-database-subnet-1
         - Key: Environment
           Value: !Ref Environment
+        - Key: Tier
+          Value: Database
 
-  PrivateSubnetDBAZ2:
+  DatabaseSubnet2:
     Type: AWS::EC2::Subnet
     Properties:
-      VpcId: !Ref VPC
-      CidrBlock: 10.1.22.0/24
+      VpcId: !Ref ServiceVPC
+      CidrBlock: !Select [5, !Cidr [!Ref VpcCidr, 6, 8]]  # 10.1.5.0/24
       AvailabilityZone: !Select [1, !GetAZs '']
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-${Environment}-Subnet-DB-AZ2'
-        - Key: Project
-          Value: !Ref ProjectName
+          Value: !Sub ${ProjectName}-${Environment}-service-database-subnet-2
         - Key: Environment
           Value: !Ref Environment
+        - Key: Tier
+          Value: Database
 
-  # ========================================
-  # NAT Gateway
-  # ========================================
-  NatGatewayEIP:
+  # ----------------------------------------------------------------------------
+  # NAT Gateways (Multi-AZ)
+  # 設計: Private Subnetからインターネットへの接続用
+  # ----------------------------------------------------------------------------
+  NatGateway1EIP:
     Type: AWS::EC2::EIP
     DependsOn: AttachGateway
     Properties:
       Domain: vpc
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-${Environment}-EIP-NAT'
+          Value: !Sub ${ProjectName}-${Environment}-service-nat-eip-1
+        - Key: Environment
+          Value: !Ref Environment
 
-  NatGateway:
+  NatGateway1:
     Type: AWS::EC2::NatGateway
     Properties:
-      AllocationId: !GetAtt NatGatewayEIP.AllocationId
-      SubnetId: !Ref PublicSubnetAZ1
+      AllocationId: !GetAtt NatGateway1EIP.AllocationId
+      SubnetId: !Ref PublicSubnet1
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-${Environment}-NAT'
+          Value: !Sub ${ProjectName}-${Environment}-service-nat-1
+        - Key: Environment
+          Value: !Ref Environment
 
-  # ========================================
-  # Route Tables
-  # ========================================
+  NatGateway2EIP:
+    Type: AWS::EC2::EIP
+    DependsOn: AttachGateway
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-service-nat-eip-2
+        - Key: Environment
+          Value: !Ref Environment
+
+  NatGateway2:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGateway2EIP.AllocationId
+      SubnetId: !Ref PublicSubnet2
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-service-nat-2
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ----------------------------------------------------------------------------
+  # Transit Gateway Attachment
+  # 設計: Service VPCをTransit Gatewayに接続
+  # ----------------------------------------------------------------------------
+  ServiceVpcTransitGatewayAttachment:
+    Type: AWS::EC2::TransitGatewayAttachment
+    Properties:
+      TransitGatewayId: !Ref TransitGatewayId
+      VpcId: !Ref ServiceVPC
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-service-tgw-attachment
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Transit Gateway Route Table Association
+  ServiceVpcTransitGatewayRouteTableAssociation:
+    Type: AWS::EC2::TransitGatewayRouteTableAssociation
+    Properties:
+      TransitGatewayAttachmentId: !Ref ServiceVpcTransitGatewayAttachment
+      TransitGatewayRouteTableId: !Ref TransitGatewayRouteTableId
+
+  # Transit Gateway Route Table Propagation
+  ServiceVpcTransitGatewayRouteTablePropagation:
+    Type: AWS::EC2::TransitGatewayRouteTablePropagation
+    Properties:
+      TransitGatewayAttachmentId: !Ref ServiceVpcTransitGatewayAttachment
+      TransitGatewayRouteTableId: !Ref TransitGatewayRouteTableId
+
+  # ----------------------------------------------------------------------------
+  # Route Tables - Public
+  # ----------------------------------------------------------------------------
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
-      VpcId: !Ref VPC
+      VpcId: !Ref ServiceVPC
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-${Environment}-RT-Public'
+          Value: !Sub ${ProjectName}-${Environment}-service-public-rtb
+        - Key: Environment
+          Value: !Ref Environment
 
-  DefaultPublicRoute:
+  PublicRoute:
     Type: AWS::EC2::Route
     DependsOn: AttachGateway
     Properties:
@@ -201,223 +310,175 @@ Resources:
       DestinationCidrBlock: 0.0.0.0/0
       GatewayId: !Ref InternetGateway
 
-  PublicSubnetAZ1RouteTableAssociation:
+  PublicSubnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
+      SubnetId: !Ref PublicSubnet1
       RouteTableId: !Ref PublicRouteTable
-      SubnetId: !Ref PublicSubnetAZ1
 
-  PublicSubnetAZ2RouteTableAssociation:
+  PublicSubnet2RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
+      SubnetId: !Ref PublicSubnet2
       RouteTableId: !Ref PublicRouteTable
-      SubnetId: !Ref PublicSubnetAZ2
 
-  PrivateRouteTable:
+  # ----------------------------------------------------------------------------
+  # Route Tables - Private (各AZ独立)
+  # 設計: NAT Gateway経由でインターネット、Transit Gateway経由でPlatform VPC
+  # ----------------------------------------------------------------------------
+  PrivateRouteTable1:
     Type: AWS::EC2::RouteTable
     Properties:
-      VpcId: !Ref VPC
+      VpcId: !Ref ServiceVPC
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-${Environment}-RT-Private'
+          Value: !Sub ${ProjectName}-${Environment}-service-private-rtb-1
+        - Key: Environment
+          Value: !Ref Environment
 
-  DefaultPrivateRoute:
+  # インターネット向けルート（NAT Gateway経由）
+  PrivateRoute1:
     Type: AWS::EC2::Route
     Properties:
-      RouteTableId: !Ref PrivateRouteTable
+      RouteTableId: !Ref PrivateRouteTable1
       DestinationCidrBlock: 0.0.0.0/0
-      NatGatewayId: !Ref NatGateway
+      NatGatewayId: !Ref NatGateway1
 
-  # Route to Platform VPC via Transit Gateway
-  PlatformVpcRoute:
+  # Platform VPC向けルート（Transit Gateway経由）
+  PrivateRouteToPlatformVpc1:
     Type: AWS::EC2::Route
-    DependsOn: TransitGatewayAttachment
+    DependsOn: ServiceVpcTransitGatewayAttachment
     Properties:
-      RouteTableId: !Ref PrivateRouteTable
-      DestinationCidrBlock: !Ref PlatformVpcCIDR
+      RouteTableId: !Ref PrivateRouteTable1
+      DestinationCidrBlock: !Ref PlatformVpcCidr
       TransitGatewayId: !Ref TransitGatewayId
 
-  PrivateSubnetAppAZ1RouteTableAssociation:
+  PrivateSubnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
-      RouteTableId: !Ref PrivateRouteTable
-      SubnetId: !Ref PrivateSubnetAppAZ1
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable1
 
-  PrivateSubnetAppAZ2RouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
+  PrivateRouteTable2:
+    Type: AWS::EC2::RouteTable
     Properties:
-      RouteTableId: !Ref PrivateRouteTable
-      SubnetId: !Ref PrivateSubnetAppAZ2
+      VpcId: !Ref ServiceVPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-service-private-rtb-2
+        - Key: Environment
+          Value: !Ref Environment
 
-  PrivateSubnetDBAZ1RouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
+  PrivateRoute2:
+    Type: AWS::EC2::Route
     Properties:
-      RouteTableId: !Ref PrivateRouteTable
-      SubnetId: !Ref PrivateSubnetDBAZ1
+      RouteTableId: !Ref PrivateRouteTable2
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway2
 
-  PrivateSubnetDBAZ2RouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
+  PrivateRouteToPlatformVpc2:
+    Type: AWS::EC2::Route
+    DependsOn: ServiceVpcTransitGatewayAttachment
     Properties:
-      RouteTableId: !Ref PrivateRouteTable
-      SubnetId: !Ref PrivateSubnetDBAZ2
-
-  # ========================================
-  # Transit Gateway Attachment
-  # ========================================
-  TransitGatewayAttachment:
-    Type: AWS::EC2::TransitGatewayAttachment
-    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      DestinationCidrBlock: !Ref PlatformVpcCidr
       TransitGatewayId: !Ref TransitGatewayId
-      VpcId: !Ref VPC
-      SubnetIds:
-        - !Ref PrivateSubnetAppAZ1
-        - !Ref PrivateSubnetAppAZ2
-      Tags:
-        - Key: Name
-          Value: !Sub '${ProjectName}-${Environment}-TGW-Attachment-Service'
-        - Key: Project
-          Value: !Ref ProjectName
-        - Key: Environment
-          Value: !Ref Environment
 
-  # ========================================
-  # Security Groups
-  # ========================================
-  ALBSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
+  PrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
-      GroupDescription: Security group for Application Load Balancer
-      VpcId: !Ref VPC
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 443
-          ToPort: 443
-          CidrIp: 0.0.0.0/0
-          Description: HTTPS from Internet
-        - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-          CidrIp: 0.0.0.0/0
-          Description: HTTP from Internet
-        - IpProtocol: tcp
-          FromPort: 443
-          ToPort: 443
-          CidrIp: !Ref PlatformVpcCIDR
-          Description: HTTPS from Platform VPC (Client VPN)
-      SecurityGroupEgress:
-        - IpProtocol: -1
-          CidrIp: 0.0.0.0/0
-      Tags:
-        - Key: Name
-          Value: !Sub '${ProjectName}-${Environment}-SG-ALB'
-        - Key: Project
-          Value: !Ref ProjectName
-        - Key: Environment
-          Value: !Ref Environment
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable2
 
-  ECSSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
+  # ----------------------------------------------------------------------------
+  # Route Tables - Database
+  # 設計: インターネット接続不要、Transit Gateway経由でPlatform VPCのみ
+  # ----------------------------------------------------------------------------
+  DatabaseRouteTable:
+    Type: AWS::EC2::RouteTable
     Properties:
-      GroupDescription: Security group for ECS Fargate tasks
-      VpcId: !Ref VPC
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 3000
-          ToPort: 3000
-          SourceSecurityGroupId: !Ref ALBSecurityGroup
-          Description: HTTP from ALB
-        - IpProtocol: tcp
-          FromPort: 3000
-          ToPort: 3000
-          CidrIp: !Ref PlatformVpcCIDR
-          Description: HTTP from Platform VPC (for debugging)
-      SecurityGroupEgress:
-        - IpProtocol: -1
-          CidrIp: 0.0.0.0/0
+      VpcId: !Ref ServiceVPC
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-${Environment}-SG-ECS'
-        - Key: Project
-          Value: !Ref ProjectName
+          Value: !Sub ${ProjectName}-${Environment}-service-database-rtb
         - Key: Environment
           Value: !Ref Environment
 
-  RDSSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
+  # Platform VPC向けルート（Transit Gateway経由）
+  DatabaseRouteToPlatformVpc:
+    Type: AWS::EC2::Route
+    DependsOn: ServiceVpcTransitGatewayAttachment
     Properties:
-      GroupDescription: Security group for RDS PostgreSQL
-      VpcId: !Ref VPC
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 5432
-          ToPort: 5432
-          SourceSecurityGroupId: !Ref ECSSecurityGroup
-          Description: PostgreSQL from ECS
-      Tags:
-        - Key: Name
-          Value: !Sub '${ProjectName}-${Environment}-SG-RDS'
-        - Key: Project
-          Value: !Ref ProjectName
-        - Key: Environment
-          Value: !Ref Environment
+      RouteTableId: !Ref DatabaseRouteTable
+      DestinationCidrBlock: !Ref PlatformVpcCidr
+      TransitGatewayId: !Ref TransitGatewayId
 
+  DatabaseSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref DatabaseSubnet1
+      RouteTableId: !Ref DatabaseRouteTable
+
+  DatabaseSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref DatabaseSubnet2
+      RouteTableId: !Ref DatabaseRouteTable
+
+# ==============================================================================
+# Outputs
+# ==============================================================================
 Outputs:
-  VPCId:
-    Description: VPC ID
-    Value: !Ref VPC
+  VpcId:
+    Description: Service VPC ID
+    Value: !Ref ServiceVPC
     Export:
-      Name: !Sub '${AWS::StackName}-VPC-ID'
+      Name: !Sub ${ProjectName}-${Environment}-service-vpc-id
 
-  PublicSubnetAZ1Id:
-    Description: Public Subnet AZ1 ID
-    Value: !Ref PublicSubnetAZ1
+  VpcCidr:
+    Description: Service VPC CIDR Block
+    Value: !Ref VpcCidr
     Export:
-      Name: !Sub '${AWS::StackName}-Subnet-Public-AZ1'
+      Name: !Sub ${ProjectName}-${Environment}-service-vpc-cidr
 
-  PublicSubnetAZ2Id:
-    Description: Public Subnet AZ2 ID
-    Value: !Ref PublicSubnetAZ2
+  PublicSubnet1Id:
+    Description: Public Subnet 1 ID
+    Value: !Ref PublicSubnet1
     Export:
-      Name: !Sub '${AWS::StackName}-Subnet-Public-AZ2'
+      Name: !Sub ${ProjectName}-${Environment}-service-public-subnet-1-id
 
-  PrivateSubnetAppAZ1Id:
-    Description: Private App Subnet AZ1 ID
-    Value: !Ref PrivateSubnetAppAZ1
+  PublicSubnet2Id:
+    Description: Public Subnet 2 ID
+    Value: !Ref PublicSubnet2
     Export:
-      Name: !Sub '${AWS::StackName}-Subnet-App-AZ1'
+      Name: !Sub ${ProjectName}-${Environment}-service-public-subnet-2-id
 
-  PrivateSubnetAppAZ2Id:
-    Description: Private App Subnet AZ2 ID
-    Value: !Ref PrivateSubnetAppAZ2
+  PrivateSubnet1Id:
+    Description: Private Subnet 1 ID
+    Value: !Ref PrivateSubnet1
     Export:
-      Name: !Sub '${AWS::StackName}-Subnet-App-AZ2'
+      Name: !Sub ${ProjectName}-${Environment}-service-private-subnet-1-id
 
-  PrivateSubnetDBAZ1Id:
-    Description: Private DB Subnet AZ1 ID
-    Value: !Ref PrivateSubnetDBAZ1
+  PrivateSubnet2Id:
+    Description: Private Subnet 2 ID
+    Value: !Ref PrivateSubnet2
     Export:
-      Name: !Sub '${AWS::StackName}-Subnet-DB-AZ1'
+      Name: !Sub ${ProjectName}-${Environment}-service-private-subnet-2-id
 
-  PrivateSubnetDBAZ2Id:
-    Description: Private DB Subnet AZ2 ID
-    Value: !Ref PrivateSubnetDBAZ2
+  DatabaseSubnet1Id:
+    Description: Database Subnet 1 ID
+    Value: !Ref DatabaseSubnet1
     Export:
-      Name: !Sub '${AWS::StackName}-Subnet-DB-AZ2'
+      Name: !Sub ${ProjectName}-${Environment}-service-database-subnet-1-id
 
-  ALBSecurityGroupId:
-    Description: ALB Security Group ID
-    Value: !Ref ALBSecurityGroup
+  DatabaseSubnet2Id:
+    Description: Database Subnet 2 ID
+    Value: !Ref DatabaseSubnet2
     Export:
-      Name: !Sub '${AWS::StackName}-SG-ALB'
+      Name: !Sub ${ProjectName}-${Environment}-service-database-subnet-2-id
 
-  ECSSecurityGroupId:
-    Description: ECS Security Group ID
-    Value: !Ref ECSSecurityGroup
+  ServiceVpcTransitGatewayAttachmentId:
+    Description: Service VPC Transit Gateway Attachment ID
+    Value: !Ref ServiceVpcTransitGatewayAttachment
     Export:
-      Name: !Sub '${AWS::StackName}-SG-ECS'
-
-  RDSSecurityGroupId:
-    Description: RDS Security Group ID
-    Value: !Ref RDSSecurityGroup
-    Export:
-      Name: !Sub '${AWS::StackName}-SG-RDS'
+      Name: !Sub ${ProjectName}-${Environment}-service-tgw-attachment-id

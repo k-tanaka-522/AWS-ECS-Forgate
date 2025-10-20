@@ -1,12 +1,19 @@
 {
-  "name": "@careapp/shared",
+  "name": "@myapp/shared",
   "version": "1.0.0",
-  "description": "CareApp Shared Library - Common utilities and database models",
-  "main": "src/index.js",
+  "description": "Shared libraries and utilities",
+  "main": "index.js",
   "scripts": {
-    "test": "echo 'Test shared library'"
+    "test": "echo \"No tests configured\" && exit 0"
   },
+  "keywords": [
+    "shared",
+    "database",
+    "utilities"
+  ],
+  "author": "Your Team",
+  "license": "MIT",
   "dependencies": {
-    "pg": "^8.11.0"
+    "pg": "^8.11.3"
   }
 }

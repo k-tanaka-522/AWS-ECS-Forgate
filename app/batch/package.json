@@ -1,16 +1,21 @@
 {
-  "name": "@careapp/batch",
+  "name": "@myapp/batch-processing",
   "version": "1.0.0",
-  "description": "CareApp Batch Service - Data transformation and integration",
+  "description": "Batch Processing Service - Data processing and aggregation",
   "main": "src/index.js",
   "scripts": {
-    "dev": "node src/index.js",
-    "build": "echo 'Build batch service'",
-    "test": "echo 'Test batch service'",
-    "job:transform": "node src/jobs/data-transform.js",
-    "job:import": "node src/jobs/data-import.js"
+    "start": "node src/index.js",
+    "dev": "NODE_ENV=development node src/index.js",
+    "test": "echo \"No tests configured\" && exit 0"
   },
+  "keywords": [
+    "batch",
+    "processing",
+    "data"
+  ],
+  "author": "Your Team",
+  "license": "MIT",
   "dependencies": {
-    "@careapp/shared": "^1.0.0"
+    "@myapp/shared": "^1.0.0"
   }
 }

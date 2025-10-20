@@ -1,6 +1,7 @@
 {
-  "name": "careapp-monorepo",
+  "name": "myapp-monorepo",
   "version": "1.0.0",
+  "description": "AWS Multi-Account Sample Application - Monorepo",
   "private": true,
   "workspaces": [
     "public",
@@ -9,23 +10,28 @@
     "shared"
   ],
   "scripts": {
-    "install:all": "npm install",
-    "build:public": "npm run build --workspace=public",
-    "build:admin": "npm run build --workspace=admin",
-    "build:batch": "npm run build --workspace=batch",
-    "build:all": "npm run build --workspaces",
-    "dev:public": "npm run dev --workspace=public",
-    "dev:admin": "npm run dev --workspace=admin",
-    "dev:batch": "npm run dev --workspace=batch",
-    "test:all": "npm run test --workspaces",
-    "lint:all": "npm run lint --workspaces"
+    "install:all": "npm install && npm run bootstrap",
+    "bootstrap": "npm install --workspaces",
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "docker:build": "npm run docker:build:public && npm run docker:build:admin && npm run docker:build:batch",
+    "docker:build:public": "docker build -f public/Dockerfile -t myapp-public-web:latest .",
+    "docker:build:admin": "docker build -f admin/Dockerfile -t myapp-admin-dashboard:latest .",
+    "docker:build:batch": "docker build -f batch/Dockerfile -t myapp-batch-processing:latest ."
   },
+  "keywords": [
+    "aws",
+    "multi-account",
+    "ecs",
+    "fargate",
+    "transit-gateway"
+  ],
+  "author": "Your Team",
+  "license": "MIT",
   "devDependencies": {
-    "@types/node": "^20.0.0",
-    "typescript": "^5.0.0"
-  },
-  "engines": {
-    "node": ">=20.0.0",
-    "npm": ">=10.0.0"
+    "eslint": "^8.50.0",
+    "eslint-config-airbnb-base": "^15.0.0",
+    "eslint-plugin-import": "^2.28.1"
   }
 }

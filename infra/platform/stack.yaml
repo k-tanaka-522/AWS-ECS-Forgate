@@ -1,0 +1,213 @@
+# ==============================================================================
+# Platform Account - Parent Stack
+# ==============================================================================
+# 目的: Platform Accountの共通基盤インフラストラクチャを構築
+# 構成: Nested Stacks (Network + Connectivity)
+# デプロイ順序: 1番目（最初にデプロイ）
+# ==============================================================================
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Platform Account Parent Stack - Shared VPC, Transit Gateway, Client VPN'
+
+# ==============================================================================
+# Parameters
+# ==============================================================================
+Parameters:
+  ProjectName:
+    Type: String
+    Default: myapp
+    Description: Project name for resource naming
+    AllowedPattern: ^[a-z][a-z0-9-]*$
+    ConstraintDescription: Must start with lowercase letter, contain only lowercase letters, numbers, and hyphens
+
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - prod
+    Description: Environment name (dev or prod)
+
+  ServiceAccountId:
+    Type: String
+    Description: Service Account AWS Account ID (12 digits)
+    AllowedPattern: ^\d{12}$
+    ConstraintDescription: Must be a 12-digit AWS account ID
+
+  VpcCidr:
+    Type: String
+    Default: 10.0.0.0/16
+    Description: CIDR block for Platform Shared VPC
+    AllowedPattern: ^(10\.\d{1,3}\.\d{1,3}\.\d{1,3}/16)$
+
+  ClientVpnCidr:
+    Type: String
+    Default: 172.16.0.0/22
+    Description: CIDR block for Client VPN (must not overlap with VPCs)
+    AllowedPattern: ^(172\.16\.\d{1,3}\.\d{1,3}/(16|17|18|19|20|21|22))$
+
+  ServerCertificateArn:
+    Type: String
+    Description: ACM Certificate ARN for Client VPN Server (must be provisioned in advance)
+    AllowedPattern: ^arn:aws:acm:[a-z0-9-]+:\d{12}:certificate/[a-f0-9-]+$
+
+  ClientRootCertificateArn:
+    Type: String
+    Description: ACM Certificate ARN for Client VPN Client Root (must be provisioned in advance)
+    AllowedPattern: ^arn:aws:acm:[a-z0-9-]+:\d{12}:certificate/[a-f0-9-]+$
+
+  NestedTemplatesBucketName:
+    Type: String
+    Description: S3 bucket name where nested templates are stored
+    AllowedPattern: ^[a-z0-9][a-z0-9-]*[a-z0-9]$
+
+# ==============================================================================
+# Metadata
+# ==============================================================================
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "Project Configuration"
+        Parameters:
+          - ProjectName
+          - Environment
+      - Label:
+          default: "Network Configuration"
+        Parameters:
+          - VpcCidr
+          - ClientVpnCidr
+      - Label:
+          default: "Cross-Account Configuration"
+        Parameters:
+          - ServiceAccountId
+      - Label:
+          default: "Certificate Configuration"
+        Parameters:
+          - ServerCertificateArn
+          - ClientRootCertificateArn
+      - Label:
+          default: "Template Storage"
+        Parameters:
+          - NestedTemplatesBucketName
+
+# ==============================================================================
+# Resources - Nested Stacks
+# ==============================================================================
+Resources:
+  # ----------------------------------------------------------------------------
+  # Network Stack: VPC, Subnets, NAT Gateways, Route Tables
+  # ----------------------------------------------------------------------------
+  NetworkStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${NestedTemplatesBucketName}.s3.${AWS::Region}.amazonaws.com/nested/network.yaml
+      Parameters:
+        ProjectName: !Ref ProjectName
+        Environment: !Ref Environment
+        VpcCidr: !Ref VpcCidr
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-network-stack
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+      TimeoutInMinutes: 30
+
+  # ----------------------------------------------------------------------------
+  # Connectivity Stack: Transit Gateway, Client VPN, RAM Sharing
+  # DependsOn: NetworkStack (requires VPC ID and Subnet IDs)
+  # ----------------------------------------------------------------------------
+  ConnectivityStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: NetworkStack
+    Properties:
+      TemplateURL: !Sub https://${NestedTemplatesBucketName}.s3.${AWS::Region}.amazonaws.com/nested/connectivity.yaml
+      Parameters:
+        ProjectName: !Ref ProjectName
+        Environment: !Ref Environment
+        ServiceAccountId: !Ref ServiceAccountId
+        VpcId: !GetAtt NetworkStack.Outputs.VpcId
+        PrivateSubnet1Id: !GetAtt NetworkStack.Outputs.PrivateSubnet1Id
+        PrivateSubnet2Id: !GetAtt NetworkStack.Outputs.PrivateSubnet2Id
+        ClientVpnCidr: !Ref ClientVpnCidr
+        ServerCertificateArn: !Ref ServerCertificateArn
+        ClientRootCertificateArn: !Ref ClientRootCertificateArn
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-connectivity-stack
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+      TimeoutInMinutes: 30
+
+# ==============================================================================
+# Outputs
+# ==============================================================================
+Outputs:
+  # Network Stack Outputs
+  VpcId:
+    Description: Platform Shared VPC ID
+    Value: !GetAtt NetworkStack.Outputs.VpcId
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-platform-vpc-id
+
+  VpcCidr:
+    Description: Platform Shared VPC CIDR
+    Value: !GetAtt NetworkStack.Outputs.VpcCidr
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-platform-vpc-cidr
+
+  PublicSubnet1Id:
+    Description: Platform Public Subnet 1 ID
+    Value: !GetAtt NetworkStack.Outputs.PublicSubnet1Id
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-platform-public-subnet-1-id
+
+  PublicSubnet2Id:
+    Description: Platform Public Subnet 2 ID
+    Value: !GetAtt NetworkStack.Outputs.PublicSubnet2Id
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-platform-public-subnet-2-id
+
+  PrivateSubnet1Id:
+    Description: Platform Private Subnet 1 ID
+    Value: !GetAtt NetworkStack.Outputs.PrivateSubnet1Id
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-platform-private-subnet-1-id
+
+  PrivateSubnet2Id:
+    Description: Platform Private Subnet 2 ID
+    Value: !GetAtt NetworkStack.Outputs.PrivateSubnet2Id
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-platform-private-subnet-2-id
+
+  # Connectivity Stack Outputs
+  TransitGatewayId:
+    Description: Transit Gateway ID (shared via RAM with Service Account)
+    Value: !GetAtt ConnectivityStack.Outputs.TransitGatewayId
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-transit-gateway-id
+
+  TransitGatewayRouteTableId:
+    Description: Transit Gateway Route Table ID
+    Value: !GetAtt ConnectivityStack.Outputs.TransitGatewayRouteTableId
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-transit-gateway-route-table-id
+
+  ClientVpnEndpointId:
+    Description: Client VPN Endpoint ID
+    Value: !GetAtt ConnectivityStack.Outputs.ClientVpnEndpointId
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-client-vpn-endpoint-id
+
+  # Stack Information
+  StackName:
+    Description: This stack name
+    Value: !Ref AWS::StackName
+
+  Region:
+    Description: AWS Region
+    Value: !Ref AWS::Region

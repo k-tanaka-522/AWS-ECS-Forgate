@@ -1,25 +1,39 @@
-# Build stage
-FROM node:20-alpine AS builder
+# ==============================================================================
+# Public Web Service - Dockerfile
+# ==============================================================================
+# Multi-stage build for optimized image size
+# ==============================================================================
 
+# Build stage
+FROM node:20-alpine AS base
+
+# Set working directory
 WORKDIR /app
 
-# Copy package files
+# Copy root package.json and package-lock.json
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci --only=production
+# Copy workspace package.json files
+COPY public/package*.json ./public/
+COPY shared/package*.json ./shared/
 
-# Runtime stage
+# Install all dependencies (including workspaces)
+RUN npm ci --only=production --workspaces
+
+# Copy application code
+COPY public/ ./public/
+COPY shared/ ./shared/
+
+# Production stage
 FROM node:20-alpine
 
+# Set working directory
 WORKDIR /app
 
-# Copy dependencies from builder
-COPY --from=builder /app/node_modules ./node_modules
-
-# Copy application source
-COPY src ./src
-COPY package.json ./
+# Copy dependencies from build stage
+COPY --from=base /app/node_modules ./node_modules
+COPY --from=base /app/public ./public
+COPY --from=base /app/shared ./shared
 
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs && \
@@ -32,11 +46,11 @@ RUN chown -R nodejs:nodejs /app
 USER nodejs
 
 # Expose port
-EXPOSE 3000
+EXPOSE 8080
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3000/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1); });"
+  CMD node -e "require('http').get('http://localhost:8080/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
 
 # Start application
-CMD ["node", "src/index.js"]
+CMD ["node", "public/src/index.js"]

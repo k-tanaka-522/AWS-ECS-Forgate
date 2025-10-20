@@ -1,0 +1,242 @@
+# ==============================================================================
+# Platform Account - Connectivity Stack (Nested)
+# ==============================================================================
+# 目的: Transit Gateway、Client VPN、RAM Sharingを構築
+# 構成: Transit Gateway + Route Table, Client VPN Endpoint, RAM Resource Share
+# 設計: Service AccountへTransit Gatewayを共有し、拠点間閉域接続を実現
+# ==============================================================================
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Platform Account Connectivity Stack - Transit Gateway, Client VPN, RAM Sharing'
+
+# ==============================================================================
+# Parameters
+# ==============================================================================
+Parameters:
+  ProjectName:
+    Type: String
+    Description: Project name for resource naming
+
+  Environment:
+    Type: String
+    Description: Environment name (dev or prod)
+
+  ServiceAccountId:
+    Type: String
+    Description: Service Account AWS Account ID (for RAM sharing)
+
+  VpcId:
+    Type: String
+    Description: Platform Shared VPC ID (from Network Stack)
+
+  PrivateSubnet1Id:
+    Type: String
+    Description: Private Subnet 1 ID for Client VPN association
+
+  PrivateSubnet2Id:
+    Type: String
+    Description: Private Subnet 2 ID for Client VPN association
+
+  ClientVpnCidr:
+    Type: String
+    Description: CIDR block for Client VPN clients
+
+  ServerCertificateArn:
+    Type: String
+    Description: ACM Certificate ARN for VPN Server
+
+  ClientRootCertificateArn:
+    Type: String
+    Description: ACM Certificate ARN for VPN Client Root
+
+# ==============================================================================
+# Resources
+# ==============================================================================
+Resources:
+  # ----------------------------------------------------------------------------
+  # Transit Gateway
+  # 設計: Service AccountのVPCと接続するためのHub
+  # DefaultRouteTableAssociation/Propagation: disableで明示的管理
+  # ----------------------------------------------------------------------------
+  TransitGateway:
+    Type: AWS::EC2::TransitGateway
+    Properties:
+      Description: !Sub ${ProjectName}-${Environment} Transit Gateway for Multi-Account connectivity
+      AmazonSideAsn: 64512
+      DefaultRouteTableAssociation: disable  # 明示的にルートテーブルを管理
+      DefaultRouteTablePropagation: disable  # 明示的にルートテーブルを管理
+      DnsSupport: enable
+      VpnEcnSupport: enable
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-tgw
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Purpose
+          Value: Multi-Account VPC connectivity
+
+  # ----------------------------------------------------------------------------
+  # Transit Gateway Route Table
+  # 設計: Platform VPC と Service VPC 間のルーティング用
+  # ----------------------------------------------------------------------------
+  TransitGatewayRouteTable:
+    Type: AWS::EC2::TransitGatewayRouteTable
+    Properties:
+      TransitGatewayId: !Ref TransitGateway
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-tgw-rtb
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ----------------------------------------------------------------------------
+  # Transit Gateway Attachment - Platform VPC
+  # 設計: Platform VPCをTransit Gatewayに接続
+  # ----------------------------------------------------------------------------
+  PlatformVpcTransitGatewayAttachment:
+    Type: AWS::EC2::TransitGatewayAttachment
+    Properties:
+      TransitGatewayId: !Ref TransitGateway
+      VpcId: !Ref VpcId
+      SubnetIds:
+        - !Ref PrivateSubnet1Id
+        - !Ref PrivateSubnet2Id
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-platform-tgw-attachment
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Platform VPC AttachmentをRoute Tableに関連付け
+  PlatformVpcTransitGatewayRouteTableAssociation:
+    Type: AWS::EC2::TransitGatewayRouteTableAssociation
+    Properties:
+      TransitGatewayAttachmentId: !Ref PlatformVpcTransitGatewayAttachment
+      TransitGatewayRouteTableId: !Ref TransitGatewayRouteTable
+
+  # Platform VPC AttachmentからのRoute Propagationを有効化
+  PlatformVpcTransitGatewayRouteTablePropagation:
+    Type: AWS::EC2::TransitGatewayRouteTablePropagation
+    Properties:
+      TransitGatewayAttachmentId: !Ref PlatformVpcTransitGatewayAttachment
+      TransitGatewayRouteTableId: !Ref TransitGatewayRouteTable
+
+  # ----------------------------------------------------------------------------
+  # RAM Resource Share - Transit Gatewayを Service Account へ共有
+  # 設計: Service AccountでTransit Gateway Attachmentを作成できるようにする
+  # ----------------------------------------------------------------------------
+  TransitGatewayResourceShare:
+    Type: AWS::RAM::ResourceShare
+    Properties:
+      Name: !Sub ${ProjectName}-${Environment}-tgw-share
+      Principals:
+        - !Sub arn:aws:iam::${ServiceAccountId}:root
+      ResourceArns:
+        - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:transit-gateway/${TransitGateway}
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-tgw-resource-share
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ----------------------------------------------------------------------------
+  # Client VPN Endpoint
+  # 設計: オンプレミス・リモートワーカーからAWSリソースへの安全なアクセス
+  # SplitTunnel: 有効（AWSトラフィックのみVPN経由）
+  # ----------------------------------------------------------------------------
+  ClientVpnEndpoint:
+    Type: AWS::EC2::ClientVpnEndpoint
+    Properties:
+      Description: !Sub ${ProjectName}-${Environment} Client VPN for secure access to AWS resources
+      ClientCidrBlock: !Ref ClientVpnCidr
+      ServerCertificateArn: !Ref ServerCertificateArn
+      AuthenticationOptions:
+        - Type: certificate-authentication
+          MutualAuthentication:
+            ClientRootCertificateChainArn: !Ref ClientRootCertificateArn
+      ConnectionLogOptions:
+        Enabled: true
+        CloudwatchLogGroup: !Ref ClientVpnLogGroup
+      DnsServers:
+        - 10.0.0.2  # VPC DNS resolver (VPC CIDR +2)
+      SplitTunnel: true  # AWSトラフィックのみVPN経由（帯域節約）
+      VpnPort: 443
+      TransportProtocol: udp
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-client-vpn
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Client VPN接続ログ用のCloudWatch Logs
+  ClientVpnLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/clientvpn/${ProjectName}-${Environment}
+      RetentionInDays: 30
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-client-vpn-logs
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Client VPNをPrivate Subnet 1に関連付け
+  ClientVpnNetworkAssociation1:
+    Type: AWS::EC2::ClientVpnTargetNetworkAssociation
+    Properties:
+      ClientVpnEndpointId: !Ref ClientVpnEndpoint
+      SubnetId: !Ref PrivateSubnet1Id
+
+  # Client VPNをPrivate Subnet 2に関連付け（冗長性）
+  ClientVpnNetworkAssociation2:
+    Type: AWS::EC2::ClientVpnTargetNetworkAssociation
+    Properties:
+      ClientVpnEndpointId: !Ref ClientVpnEndpoint
+      SubnetId: !Ref PrivateSubnet2Id
+
+  # Client VPN Authorization Rule - すべてのVPCへのアクセスを許可
+  ClientVpnAuthorizationRule:
+    Type: AWS::EC2::ClientVpnAuthorizationRule
+    Properties:
+      ClientVpnEndpointId: !Ref ClientVpnEndpoint
+      TargetNetworkCidr: 10.0.0.0/8  # すべてのプライベートIP範囲（Platform + Service VPC）
+      AuthorizeAllGroups: true
+      Description: Allow access to all VPCs via Transit Gateway
+
+  # ----------------------------------------------------------------------------
+  # Platform VPC Route Table への Transit Gateway ルート追加
+  # 設計: Platform VPCからService VPC (10.1.0.0/16) へのルーティング
+  # ----------------------------------------------------------------------------
+  # Note: Route Tableの参照は親スタック（stack.yaml）から渡すか、
+  #       Export/Importを使用する必要があります。
+  #       ここではサンプルとして記載していますが、実際の環境では
+  #       Network Stackから Route Table ID を Output し、
+  #       このスタックで Parameter として受け取る必要があります。
+
+# ==============================================================================
+# Outputs
+# ==============================================================================
+Outputs:
+  TransitGatewayId:
+    Description: Transit Gateway ID (shared with Service Account)
+    Value: !Ref TransitGateway
+
+  TransitGatewayRouteTableId:
+    Description: Transit Gateway Route Table ID
+    Value: !Ref TransitGatewayRouteTable
+
+  PlatformVpcTransitGatewayAttachmentId:
+    Description: Platform VPC Transit Gateway Attachment ID
+    Value: !Ref PlatformVpcTransitGatewayAttachment
+
+  ClientVpnEndpointId:
+    Description: Client VPN Endpoint ID
+    Value: !Ref ClientVpnEndpoint
+
+  ClientVpnDnsName:
+    Description: Client VPN DNS Name (for client configuration)
+    Value: !GetAtt ClientVpnEndpoint.DnsName
+
+  TransitGatewayResourceShareArn:
+    Description: RAM Resource Share ARN
+    Value: !GetAtt TransitGatewayResourceShare.Arn

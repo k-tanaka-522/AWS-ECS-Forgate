@@ -226,7 +226,14 @@ AI: わかりました。要件定義フェーズに戻りますね。
 
 ### 4.3 フェーズごとの決定事項
 
-各フェーズで**決めるべきこと**は `.claude/docs/10_facilitation/11_decision-items.md` を参照してください。
+各フェーズで**決めるべきこと**は、各フェーズドキュメントの「決定項目チェックリスト」を参照してください。
+
+- 企画フェーズ: `.claude/docs/10_facilitation/11_planning_phase.md`
+- 要件定義フェーズ: `.claude/docs/10_facilitation/12_requirements_phase.md`
+- 設計フェーズ: `.claude/docs/10_facilitation/13_design_phase.md`
+- 実装フェーズ: `.claude/docs/10_facilitation/14_implementation_phase.md`
+- テストフェーズ: `.claude/docs/10_facilitation/15_testing_phase.md`
+- 納品フェーズ: `.claude/docs/10_facilitation/16_delivery_phase.md`
 
 ---
 
@@ -262,7 +269,28 @@ AI: わかりました。要件定義フェーズに戻りますね。
 ### 6.1 技術標準の適用
 
 **原則：**
-コード生成時は、必ず`.claude/docs/40_standards/`の技術標準を参照し、適用する。
+コード・ドキュメント生成時は、必ず **`.claude/docs/40_standards/` の技術標準**を参照し、適用する。
+
+**参照方法：**
+1. `.claude/docs/40_standards/` から該当する技術標準ファイルを確認
+   - Python: `41_python.md`
+   - TypeScript: `42_typescript.md`
+   - C#: `43_csharp.md`
+   - Go: `44_go.md`
+   - CloudFormation: `45_cloudformation.md`
+   - Terraform: `46_terraform.md`
+   - Security: `49_security.md`
+
+2. 技術標準ファイルで以下を確認：
+   - 規約・パターン
+   - プロジェクト構成
+   - ✅ Good Example
+   - ❌ Bad Example
+   - ベストプラクティス
+
+**補足情報が必要な場合：**
+- `.claude/docs/NOTION_INDEX.md` からNotionワークスペースを参照（オプション）
+- または一般的なベストプラクティスを適用
 
 **4つの基本方針：**
 1. 品質確保
@@ -270,19 +298,18 @@ AI: わかりました。要件定義フェーズに戻りますね。
 3. 一貫性の維持
 4. ベストプラクティスの適用
 
-### 6.2 コード生成の流れ
+### 6.2 コード・ドキュメント生成の流れ
 
 **原則：**
-1. **技術標準の再読み込み**（重要！）
-   - コード生成直前に該当する技術標準を**必ず再読み込み**
-   - 理由：長い会話で制約を忘れないため
-   - 詳細は `.claude/docs/10_facilitation/13_context-management.md` を参照
+1. **技術標準の参照**（重要！）
+   - コード・ドキュメント生成直前に **`.claude/docs/40_standards/` の技術標準を必ず参照**
+   - 理由：長い会話で制約を忘れないため、最新のベストプラクティスを適用するため
 
 2. **事前説明**
-   - 「これからコードを生成します」
-   - 「技術標準（モジュール分割、環境差分管理等）を適用します」
+   - 「これからコード/ドキュメントを生成します」
+   - 「`.claude/docs/40_standards/` の技術標準（モジュール分割、環境差分管理等）を適用します」
 
-3. **コード生成**
+3. **コード・ドキュメント生成**
    - 技術標準に従って自動生成
 
 4. **事後説明**（学習機会）
@@ -292,36 +319,32 @@ AI: わかりました。要件定義フェーズに戻りますね。
 
 ---
 
-#### CloudFormation/Terraformコード生成時の具体的手順
+#### コード生成時の具体的手順（例：CloudFormation/Terraform）
 
 **必須手順：**
 
 ```
-ステップ1: 技術標準の再読み込み
+ステップ1: 技術標準の参照
   ↓
-  `.claude/docs/40_standards/42_infrastructure.md` を読み込む
+  1. `.claude/docs/40_standards/45_cloudformation.md` を開く
+  2. 以下を確認：
+     - スタック設計パターン
+     - 命名規則
+     - ✅ Good Example
+     - ❌ Bad Example
+     - Change Sets必須（dry-run）
 
-ステップ2: 重要制約の確認
+ステップ2: ユーザーに事前説明
   ↓
-  - セクション1.2: 日本語制約を確認
-    - 論理ID、パラメータ名、スタック名は英数字のみ
-    - コメントは日本語OK（Lambda内部は除く）
-    - Tagsのvalueは日本語可
-  - セクション8: 開発ワークフローを確認
-    - 小さく始めて段階的に拡張
-    - DependsOnの必要性を検討
+  「CloudFormation コードを生成します。
+   `.claude/docs/40_standards/45_cloudformation.md` の技術標準に従って、
+   Change Setsによるdry-run必須、Well-Architected Framework準拠で実装します。」
 
-ステップ3: ユーザーに事前説明
+ステップ3: コード生成
   ↓
-  「CloudFormationコードを生成します。
-   技術標準に従って、論理IDは英数字のみ、
-   日本語はコメントとTagsのValueのみ使用します。」
+  技術標準で確認した制約を守ってコード生成
 
-ステップ4: コード生成
-  ↓
-  制約を守ってコード生成
-
-ステップ5: 事後説明
+ステップ4: 事後説明
   ↓
   - 構造の説明
   - なぜこの設計にしたか

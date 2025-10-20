@@ -1,0 +1,248 @@
+# ==============================================================================
+# CI/CD Pipeline - GitHub Actions
+# ==============================================================================
+# 目的: Docker イメージビルド、ECRプッシュ、ECS デプロイ
+# トリガー: mainブランチへのpush
+# ==============================================================================
+
+name: Deploy to AWS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:  # 手動実行を許可
+
+env:
+  AWS_REGION: ap-northeast-1
+  ECR_REGISTRY_PREFIX: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.ap-northeast-1.amazonaws.com
+  PROJECT_NAME: myapp
+  ENVIRONMENT: dev
+
+jobs:
+  # ===========================================================================
+  # Job 1: Build and Push Docker Images
+  # ===========================================================================
+  build-and-push:
+    name: Build and Push Docker Images
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write  # OIDC用
+      contents: read
+
+    outputs:
+      image-tag: ${{ steps.generate-tag.outputs.tag }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Generate image tag
+        id: generate-tag
+        run: |
+          # コミットSHAの短縮版をタグとして使用
+          TAG=$(echo ${{ github.sha }} | cut -c1-7)
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "Generated image tag: ${TAG}"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Public Web image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./app
+          file: ./app/public/Dockerfile
+          push: true
+          tags: |
+            ${{ env.ECR_REGISTRY_PREFIX }}/${{ env.PROJECT_NAME }}/public-web:${{ steps.generate-tag.outputs.tag }}
+            ${{ env.ECR_REGISTRY_PREFIX }}/${{ env.PROJECT_NAME }}/public-web:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push Admin Dashboard image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./app
+          file: ./app/admin/Dockerfile
+          push: true
+          tags: |
+            ${{ env.ECR_REGISTRY_PREFIX }}/${{ env.PROJECT_NAME }}/admin-dashboard:${{ steps.generate-tag.outputs.tag }}
+            ${{ env.ECR_REGISTRY_PREFIX }}/${{ env.PROJECT_NAME }}/admin-dashboard:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push Batch Processing image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./app
+          file: ./app/batch/Dockerfile
+          push: true
+          tags: |
+            ${{ env.ECR_REGISTRY_PREFIX }}/${{ env.PROJECT_NAME }}/batch-processing:${{ steps.generate-tag.outputs.tag }}
+            ${{ env.ECR_REGISTRY_PREFIX }}/${{ env.PROJECT_NAME }}/batch-processing:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ===========================================================================
+  # Job 2: Deploy to ECS
+  # ===========================================================================
+  deploy-ecs:
+    name: Deploy to ECS
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update Public Web ECS service
+        run: |
+          aws ecs update-service \
+            --cluster ${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-cluster \
+            --service ${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-public-web \
+            --force-new-deployment \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Update Admin Dashboard ECS service
+        run: |
+          aws ecs update-service \
+            --cluster ${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-cluster \
+            --service ${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-admin-dashboard \
+            --force-new-deployment \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Update Batch Processing ECS service
+        run: |
+          aws ecs update-service \
+            --cluster ${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-cluster \
+            --service ${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-batch-processing \
+            --force-new-deployment \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Wait for Public Web service to stabilize
+        run: |
+          aws ecs wait services-stable \
+            --cluster ${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-cluster \
+            --services ${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-public-web \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Wait for Admin Dashboard service to stabilize
+        run: |
+          aws ecs wait services-stable \
+            --cluster ${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-cluster \
+            --services ${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-admin-dashboard \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Wait for Batch Processing service to stabilize
+        run: |
+          aws ecs wait services-stable \
+            --cluster ${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-cluster \
+            --services ${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-batch-processing \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Deployment successful
+        run: |
+          echo "✅ Deployment successful!"
+          echo "Image tag: ${{ needs.build-and-push.outputs.image-tag }}"
+          echo "Region: ${{ env.AWS_REGION }}"
+          echo "Environment: ${{ env.ENVIRONMENT }}"
+
+  # ===========================================================================
+  # Job 3: Post-deployment verification
+  # ===========================================================================
+  verify-deployment:
+    name: Verify Deployment
+    runs-on: ubuntu-latest
+    needs: deploy-ecs
+    permissions:
+      contents: read
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Check ECS service status
+        run: |
+          echo "Checking ECS service status..."
+
+          # Public Web Service
+          PUBLIC_STATUS=$(aws ecs describe-services \
+            --cluster ${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-cluster \
+            --services ${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-public-web \
+            --query 'services[0].deployments[0].status' \
+            --output text \
+            --region ${{ env.AWS_REGION }})
+
+          echo "Public Web Service status: ${PUBLIC_STATUS}"
+
+          # Admin Dashboard Service
+          ADMIN_STATUS=$(aws ecs describe-services \
+            --cluster ${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-cluster \
+            --services ${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-admin-dashboard \
+            --query 'services[0].deployments[0].status' \
+            --output text \
+            --region ${{ env.AWS_REGION }})
+
+          echo "Admin Dashboard Service status: ${ADMIN_STATUS}"
+
+          # Batch Processing Service
+          BATCH_STATUS=$(aws ecs describe-services \
+            --cluster ${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-cluster \
+            --services ${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-batch-processing \
+            --query 'services[0].deployments[0].status' \
+            --output text \
+            --region ${{ env.AWS_REGION }})
+
+          echo "Batch Processing Service status: ${BATCH_STATUS}"
+
+      - name: Get ALB DNS names
+        run: |
+          echo "Getting ALB DNS names..."
+
+          # Public Web ALB
+          PUBLIC_ALB_DNS=$(aws cloudformation describe-stacks \
+            --stack-name ${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-service-compute \
+            --query 'Stacks[0].Outputs[?OutputKey==`PublicWebALBDnsName`].OutputValue' \
+            --output text \
+            --region ${{ env.AWS_REGION }})
+
+          echo "Public Web ALB: http://${PUBLIC_ALB_DNS}"
+
+          # Admin Dashboard ALB (Internal)
+          ADMIN_ALB_DNS=$(aws cloudformation describe-stacks \
+            --stack-name ${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-service-compute \
+            --query 'Stacks[0].Outputs[?OutputKey==`AdminDashboardALBDnsName`].OutputValue' \
+            --output text \
+            --region ${{ env.AWS_REGION }})
+
+          echo "Admin Dashboard ALB (Internal): http://${ADMIN_ALB_DNS}"
+
+      - name: Deployment verification complete
+        run: |
+          echo "✅ Deployment verification complete!"

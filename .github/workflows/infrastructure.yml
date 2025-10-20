@@ -1,0 +1,241 @@
+# ==============================================================================
+# Infrastructure Deployment - GitHub Actions
+# ==============================================================================
+# 目的: CloudFormation スタックのデプロイ（Change Sets経由）
+# トリガー: 手動実行のみ（workflow_dispatch）
+# ==============================================================================
+
+name: Deploy Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      account_type:
+        description: 'Account type to deploy'
+        required: true
+        type: choice
+        options:
+          - platform
+          - service
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        type: choice
+        options:
+          - dev
+          - prod
+      action:
+        description: 'Action to perform'
+        required: true
+        type: choice
+        options:
+          - create
+          - update
+          - delete
+
+env:
+  AWS_REGION: ap-northeast-1
+  PROJECT_NAME: myapp
+
+jobs:
+  # ===========================================================================
+  # Platform Account Deployment
+  # ===========================================================================
+  deploy-platform:
+    name: Deploy Platform Account
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.account_type == 'platform' }}
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (Platform Account)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.PLATFORM_AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.PLATFORM_AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Upload nested templates to S3
+        run: |
+          BUCKET_NAME="${{ env.PROJECT_NAME }}-${{ github.event.inputs.environment }}-cfn-templates"
+
+          echo "Uploading nested templates to s3://${BUCKET_NAME}/nested/"
+          aws s3 cp infra/platform/nested/ s3://${BUCKET_NAME}/nested/ --recursive
+
+      - name: Create Change Set
+        if: ${{ github.event.inputs.action == 'create' || github.event.inputs.action == 'update' }}
+        run: |
+          STACK_NAME="${{ env.PROJECT_NAME }}-${{ github.event.inputs.environment }}-platform"
+          CHANGE_SET_NAME="${STACK_NAME}-changeset-$(date +%Y%m%d%H%M%S)"
+
+          echo "Creating Change Set: ${CHANGE_SET_NAME}"
+
+          aws cloudformation create-change-set \
+            --stack-name ${STACK_NAME} \
+            --change-set-name ${CHANGE_SET_NAME} \
+            --template-body file://infra/platform/stack.yaml \
+            --parameters file://infra/platform/parameters-${{ github.event.inputs.environment }}.json \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --region ${{ env.AWS_REGION }}
+
+          echo "CHANGE_SET_NAME=${CHANGE_SET_NAME}" >> $GITHUB_ENV
+          echo "STACK_NAME=${STACK_NAME}" >> $GITHUB_ENV
+
+      - name: Wait for Change Set creation
+        if: ${{ github.event.inputs.action == 'create' || github.event.inputs.action == 'update' }}
+        run: |
+          echo "Waiting for Change Set creation to complete..."
+          aws cloudformation wait change-set-create-complete \
+            --stack-name ${{ env.STACK_NAME }} \
+            --change-set-name ${{ env.CHANGE_SET_NAME }} \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Describe Change Set
+        if: ${{ github.event.inputs.action == 'create' || github.event.inputs.action == 'update' }}
+        run: |
+          echo "Change Set details:"
+          aws cloudformation describe-change-set \
+            --stack-name ${{ env.STACK_NAME }} \
+            --change-set-name ${{ env.CHANGE_SET_NAME }} \
+            --query 'Changes[*].[ResourceChange.Action, ResourceChange.ResourceType, ResourceChange.LogicalResourceId]' \
+            --output table \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Execute Change Set
+        if: ${{ github.event.inputs.action == 'create' || github.event.inputs.action == 'update' }}
+        run: |
+          echo "Executing Change Set: ${{ env.CHANGE_SET_NAME }}"
+          aws cloudformation execute-change-set \
+            --stack-name ${{ env.STACK_NAME }} \
+            --change-set-name ${{ env.CHANGE_SET_NAME }} \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Wait for stack operation to complete
+        if: ${{ github.event.inputs.action == 'create' || github.event.inputs.action == 'update' }}
+        run: |
+          echo "Waiting for stack operation to complete..."
+          aws cloudformation wait stack-${{ github.event.inputs.action }}-complete \
+            --stack-name ${{ env.STACK_NAME }} \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Delete stack
+        if: ${{ github.event.inputs.action == 'delete' }}
+        run: |
+          STACK_NAME="${{ env.PROJECT_NAME }}-${{ github.event.inputs.environment }}-platform"
+          echo "Deleting stack: ${STACK_NAME}"
+
+          aws cloudformation delete-stack \
+            --stack-name ${STACK_NAME} \
+            --region ${{ env.AWS_REGION }}
+
+          aws cloudformation wait stack-delete-complete \
+            --stack-name ${STACK_NAME} \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Deployment complete
+        run: |
+          echo "✅ Platform Account deployment complete!"
+          echo "Action: ${{ github.event.inputs.action }}"
+          echo "Environment: ${{ github.event.inputs.environment }}"
+
+  # ===========================================================================
+  # Service Account Deployment
+  # ===========================================================================
+  deploy-service:
+    name: Deploy Service Account
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.account_type == 'service' }}
+    permissions:
+      id-token: write
+      contents: read
+
+    strategy:
+      matrix:
+        stack: [network, database, compute]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (Service Account)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.SERVICE_AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.SERVICE_AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get stack number
+        id: stack-number
+        run: |
+          case "${{ matrix.stack }}" in
+            network) echo "number=01" >> $GITHUB_OUTPUT ;;
+            database) echo "number=02" >> $GITHUB_OUTPUT ;;
+            compute) echo "number=03" >> $GITHUB_OUTPUT ;;
+          esac
+
+      - name: Create Change Set
+        if: ${{ github.event.inputs.action == 'create' || github.event.inputs.action == 'update' }}
+        run: |
+          STACK_NAME="${{ env.PROJECT_NAME }}-${{ github.event.inputs.environment }}-service-${{ matrix.stack }}"
+          CHANGE_SET_NAME="${STACK_NAME}-changeset-$(date +%Y%m%d%H%M%S)"
+
+          echo "Creating Change Set for ${{ matrix.stack }}: ${CHANGE_SET_NAME}"
+
+          aws cloudformation create-change-set \
+            --stack-name ${STACK_NAME} \
+            --change-set-name ${CHANGE_SET_NAME} \
+            --template-body file://infra/service/${{ steps.stack-number.outputs.number }}-${{ matrix.stack }}.yaml \
+            --parameters "$(cat infra/service/parameters-${{ github.event.inputs.environment }}.json | jq -r '."${{ steps.stack-number.outputs.number }}-${{ matrix.stack }}"')" \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --region ${{ env.AWS_REGION }}
+
+          echo "CHANGE_SET_NAME=${CHANGE_SET_NAME}" >> $GITHUB_ENV
+          echo "STACK_NAME=${STACK_NAME}" >> $GITHUB_ENV
+
+      - name: Wait and Execute Change Set
+        if: ${{ github.event.inputs.action == 'create' || github.event.inputs.action == 'update' }}
+        run: |
+          aws cloudformation wait change-set-create-complete \
+            --stack-name ${{ env.STACK_NAME }} \
+            --change-set-name ${{ env.CHANGE_SET_NAME }} \
+            --region ${{ env.AWS_REGION }}
+
+          echo "Change Set details:"
+          aws cloudformation describe-change-set \
+            --stack-name ${{ env.STACK_NAME }} \
+            --change-set-name ${{ env.CHANGE_SET_NAME }} \
+            --query 'Changes[*].[ResourceChange.Action, ResourceChange.ResourceType, ResourceChange.LogicalResourceId]' \
+            --output table \
+            --region ${{ env.AWS_REGION }}
+
+          aws cloudformation execute-change-set \
+            --stack-name ${{ env.STACK_NAME }} \
+            --change-set-name ${{ env.CHANGE_SET_NAME }} \
+            --region ${{ env.AWS_REGION }}
+
+          aws cloudformation wait stack-${{ github.event.inputs.action }}-complete \
+            --stack-name ${{ env.STACK_NAME }} \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Delete stack
+        if: ${{ github.event.inputs.action == 'delete' }}
+        run: |
+          STACK_NAME="${{ env.PROJECT_NAME }}-${{ github.event.inputs.environment }}-service-${{ matrix.stack }}"
+          echo "Deleting stack: ${STACK_NAME}"
+
+          aws cloudformation delete-stack \
+            --stack-name ${STACK_NAME} \
+            --region ${{ env.AWS_REGION }}
+
+          aws cloudformation wait stack-delete-complete \
+            --stack-name ${STACK_NAME} \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Deployment complete
+        run: |
+          echo "✅ Service Account ${{ matrix.stack }} stack deployment complete!"

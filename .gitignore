@@ -7,12 +7,10 @@
 .env
 .env.local
 .env.*.local
-!.env.example
 
-# CloudFormation パラメータファイル（機密情報含む）
-infra/**/parameters-*.json
-!infra/**/parameters-*.json.example
-**/secrets.tfvars
+# MCP設定（API キーを含む）
+.mcp.json
+.claude/mcp.json
 
 # 依存関係
 node_modules/
@@ -45,6 +43,12 @@ desktop.ini
 
 # AWS
 .aws/
+
+# CloudFormation Secrets
+**/secrets.json
+**/secrets.yaml
+**/secrets-*.json
+**/*-secrets.json
 
 # ログ
 *.log
