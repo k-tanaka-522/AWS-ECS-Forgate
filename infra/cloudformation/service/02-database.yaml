@@ -1,0 +1,217 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Service Account - Database Resources (RDS PostgreSQL, Secrets Manager)'
+
+# ==============================================================================
+# Parameters
+# ==============================================================================
+Parameters:
+  Environment:
+    Type: String
+    Description: Environment name
+    AllowedValues:
+      - dev
+      - prod
+    Default: dev
+
+  ProjectName:
+    Type: String
+    Description: Project name
+    Default: sample-app
+
+  DBMasterUsername:
+    Type: String
+    Description: Database master username
+    Default: postgres
+
+  DBMasterPasswordSecretArn:
+    Type: String
+    Description: Secrets Manager ARN for database master password
+
+  DBName:
+    Type: String
+    Description: Database name
+    Default: sampledb
+
+# ==============================================================================
+# Conditions
+# ==============================================================================
+Conditions:
+  IsProduction: !Equals [!Ref Environment, prod]
+
+# ==============================================================================
+# Resources
+# ==============================================================================
+Resources:
+  # ----------------------------------------------------------------------------
+  # Security Group for RDS
+  # ----------------------------------------------------------------------------
+  DBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for RDS PostgreSQL
+      VpcId:
+        Fn::ImportValue: !Sub ${ProjectName}-${Environment}-service-vpc-id
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId:
+            Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ecs-security-group-id
+          Description: Allow from ECS tasks
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: 10.0.0.0/16
+          Description: Allow from Platform VPC (VPN access)
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-db-sg
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ----------------------------------------------------------------------------
+  # DB Subnet Group
+  # ----------------------------------------------------------------------------
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupName: !Sub ${ProjectName}-${Environment}-db-subnet-group
+      DBSubnetGroupDescription: Database subnet group
+      SubnetIds:
+        - Fn::ImportValue: !Sub ${ProjectName}-${Environment}-database-subnet-1-id
+        - Fn::ImportValue: !Sub ${ProjectName}-${Environment}-database-subnet-2-id
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-db-subnet-group
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ----------------------------------------------------------------------------
+  # KMS Key for RDS Encryption
+  # ----------------------------------------------------------------------------
+  DBEncryptionKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub KMS key for ${ProjectName}-${Environment} RDS encryption
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action: kms:*
+            Resource: '*'
+          - Sid: Allow RDS to use the key
+            Effect: Allow
+            Principal:
+              Service: rds.amazonaws.com
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+              - kms:CreateGrant
+            Resource: '*'
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-db-encryption-key
+        - Key: Environment
+          Value: !Ref Environment
+
+  DBEncryptionKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub alias/${ProjectName}-${Environment}-db-encryption
+      TargetKeyId: !Ref DBEncryptionKey
+
+  # ----------------------------------------------------------------------------
+  # RDS PostgreSQL Instance
+  # ----------------------------------------------------------------------------
+  RDSInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier: !Sub ${ProjectName}-${Environment}-db
+      DBName: !Ref DBName
+      Engine: postgres
+      EngineVersion: '14.10'
+      DBInstanceClass: !If [IsProduction, db.r5.large, db.t3.micro]
+      AllocatedStorage: 20
+      MaxAllocatedStorage: 100
+      StorageType: gp3
+      StorageEncrypted: true
+      KmsKeyId: !Ref DBEncryptionKey
+      MasterUsername: !Ref DBMasterUsername
+      MasterUserPassword: !Sub '{{resolve:secretsmanager:${DBMasterPasswordSecretArn}:SecretString:password}}'
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups:
+        - !Ref DBSecurityGroup
+      MultiAZ: !If [IsProduction, true, false]
+      PubliclyAccessible: false
+      BackupRetentionPeriod: !If [IsProduction, 7, 1]
+      PreferredBackupWindow: '03:00-04:00'
+      PreferredMaintenanceWindow: 'sun:04:00-sun:05:00'
+      EnableCloudwatchLogsExports:
+        - postgresql
+      DeletionProtection: !If [IsProduction, true, false]
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-db
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ----------------------------------------------------------------------------
+  # Secrets Manager Secret for Application (includes DB endpoint)
+  # ----------------------------------------------------------------------------
+  AppDBSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub ${ProjectName}/${Environment}/db-connection
+      Description: Database connection information for applications
+      SecretString: !Sub |
+        {
+          "host": "${RDSInstance.Endpoint.Address}",
+          "port": ${RDSInstance.Endpoint.Port},
+          "database": "${DBName}",
+          "username": "${DBMasterUsername}",
+          "password": "{{resolve:secretsmanager:${DBMasterPasswordSecretArn}:SecretString:password}}"
+        }
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-db-connection
+        - Key: Environment
+          Value: !Ref Environment
+
+# ==============================================================================
+# Outputs
+# ==============================================================================
+Outputs:
+  DBEndpoint:
+    Description: RDS instance endpoint
+    Value: !GetAtt RDSInstance.Endpoint.Address
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-db-endpoint
+
+  DBPort:
+    Description: RDS instance port
+    Value: !GetAtt RDSInstance.Endpoint.Port
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-db-port
+
+  DBName:
+    Description: Database name
+    Value: !Ref DBName
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-db-name
+
+  DBSecurityGroupId:
+    Description: Database security group ID
+    Value: !Ref DBSecurityGroup
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-db-sg-id
+
+  AppDBSecretArn:
+    Description: Application database secret ARN
+    Value: !Ref AppDBSecret
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-db-secret-arn

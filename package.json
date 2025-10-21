@@ -1,0 +1,27 @@
+{
+  "name": "sample-aws-app",
+  "version": "1.0.0",
+  "description": "AWS Multi-Account Sample Application with Transit Gateway",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "test": "npm run test --workspaces",
+    "lint": "npm run lint --workspaces"
+  },
+  "keywords": [
+    "aws",
+    "ecs",
+    "fargate",
+    "transit-gateway",
+    "multi-account"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "eslint": "^8.50.0",
+    "prettier": "^3.0.3"
+  }
+}

@@ -1,0 +1,138 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Platform Account - Main Stack (Nested Stacks)'
+
+# ==============================================================================
+# Parameters
+# ==============================================================================
+Parameters:
+  Environment:
+    Type: String
+    Description: Environment name
+    AllowedValues:
+      - dev
+      - prod
+    Default: dev
+
+  ProjectName:
+    Type: String
+    Description: Project name
+    Default: sample-app
+
+  PlatformVPCCIDR:
+    Type: String
+    Description: Platform VPC CIDR block
+    Default: 10.0.0.0/16
+
+  PublicSubnet1CIDR:
+    Type: String
+    Description: Public Subnet 1 CIDR
+    Default: 10.0.1.0/24
+
+  PublicSubnet2CIDR:
+    Type: String
+    Description: Public Subnet 2 CIDR
+    Default: 10.0.2.0/24
+
+  PrivateSubnet1CIDR:
+    Type: String
+    Description: Private Subnet 1 CIDR
+    Default: 10.0.11.0/24
+
+  PrivateSubnet2CIDR:
+    Type: String
+    Description: Private Subnet 2 CIDR
+    Default: 10.0.12.0/24
+
+  ClientVPNServerCertificateArn:
+    Type: String
+    Description: ACM Certificate ARN for Client VPN server
+
+  ClientVPNClientCertificateArn:
+    Type: String
+    Description: ACM Certificate ARN for Client VPN client
+
+  ClientVPNTargetCIDR:
+    Type: String
+    Description: Client VPN target network CIDR
+    Default: 10.100.0.0/22
+
+  ServiceAccountId:
+    Type: String
+    Description: AWS Account ID for Service Account
+
+# ==============================================================================
+# Resources
+# ==============================================================================
+Resources:
+  # ----------------------------------------------------------------------------
+  # Network Stack (VPC, Subnets, Route Tables, NAT Gateway)
+  # ----------------------------------------------------------------------------
+  NetworkStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://s3.${AWS::Region}.amazonaws.com/${AWS::StackName}-templates/nested/network.yaml
+      Parameters:
+        Environment: !Ref Environment
+        ProjectName: !Ref ProjectName
+        PlatformVPCCIDR: !Ref PlatformVPCCIDR
+        PublicSubnet1CIDR: !Ref PublicSubnet1CIDR
+        PublicSubnet2CIDR: !Ref PublicSubnet2CIDR
+        PrivateSubnet1CIDR: !Ref PrivateSubnet1CIDR
+        PrivateSubnet2CIDR: !Ref PrivateSubnet2CIDR
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-network-stack
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ----------------------------------------------------------------------------
+  # Connectivity Stack (Transit Gateway, Client VPN)
+  # ----------------------------------------------------------------------------
+  ConnectivityStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: NetworkStack
+    Properties:
+      TemplateURL: !Sub https://s3.${AWS::Region}.amazonaws.com/${AWS::StackName}-templates/nested/connectivity.yaml
+      Parameters:
+        Environment: !Ref Environment
+        ProjectName: !Ref ProjectName
+        PlatformVPCId: !GetAtt NetworkStack.Outputs.PlatformVPCId
+        PrivateSubnet1Id: !GetAtt NetworkStack.Outputs.PrivateSubnet1Id
+        PrivateSubnet2Id: !GetAtt NetworkStack.Outputs.PrivateSubnet2Id
+        PrivateRouteTable1Id: !GetAtt NetworkStack.Outputs.PrivateRouteTable1Id
+        PrivateRouteTable2Id: !GetAtt NetworkStack.Outputs.PrivateRouteTable2Id
+        ClientVPNServerCertificateArn: !Ref ClientVPNServerCertificateArn
+        ClientVPNClientCertificateArn: !Ref ClientVPNClientCertificateArn
+        ClientVPNTargetCIDR: !Ref ClientVPNTargetCIDR
+        ServiceAccountId: !Ref ServiceAccountId
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-connectivity-stack
+        - Key: Environment
+          Value: !Ref Environment
+
+# ==============================================================================
+# Outputs
+# ==============================================================================
+Outputs:
+  PlatformVPCId:
+    Description: Platform VPC ID
+    Value: !GetAtt NetworkStack.Outputs.PlatformVPCId
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-platform-vpc-id
+
+  TransitGatewayId:
+    Description: Transit Gateway ID
+    Value: !GetAtt ConnectivityStack.Outputs.TransitGatewayId
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-tgw-id
+
+  ClientVpnEndpointId:
+    Description: Client VPN Endpoint ID
+    Value: !GetAtt ConnectivityStack.Outputs.ClientVpnEndpointId
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-vpn-endpoint-id
+
+  TransitGatewayShareArn:
+    Description: Transit Gateway Resource Share ARN
+    Value: !GetAtt ConnectivityStack.Outputs.TransitGatewayShareArn

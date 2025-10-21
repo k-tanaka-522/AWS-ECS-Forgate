@@ -44,12 +44,6 @@ desktop.ini
 # AWS
 .aws/
 
-# CloudFormation Secrets
-**/secrets.json
-**/secrets.yaml
-**/secrets-*.json
-**/*-secrets.json
-
 # ログ
 *.log
 logs/
