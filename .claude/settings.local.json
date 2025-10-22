@@ -10,7 +10,9 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(git push:*)",
-      "Bash(mkdir -p \"c:/dev2/sampleAWS/docs/04_詳細設計書\")"
+      "Bash(for f in \"C:\\dev2\\sampleAWS\\app\\public\\src\\index.js\" \"C:\\dev2\\sampleAWS\\app\\admin\\src\\index.js\" \"C:\\dev2\\sampleAWS\\app\\batch\\src\\index.js\")",
+      "Bash(do wc -l \"$f\")",
+      "Bash(done)"
     ],
     "deny": [],
     "ask": []

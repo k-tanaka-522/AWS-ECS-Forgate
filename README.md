@@ -9,17 +9,16 @@ AWS Multi-Account構成のサンプルアプリケーションです。Transit G
 - AWS Multi-Account構成の技術検証
 - Transit Gatewayによる拠点間閉域接続の実装
 - ECS Fargate + RDS PostgreSQL構成の実践
-- CloudFormation + GitHub Actionsによる自動化
+- CloudFormation による Infrastructure as Code
 
 ### 主要技術
 
 - **Infrastructure**: AWS Multi-Account (Platform + Service), CloudFormation
 - **Compute**: ECS Fargate
-- **Database**: RDS PostgreSQL 15 (Multi-AZ)
+- **Database**: RDS PostgreSQL 14.10 (Multi-AZ)
 - **Network**: Transit Gateway, Client VPN, VPC
 - **Application**: Node.js 20, Express.js
-- **CI/CD**: GitHub Actions
-- **Monitoring**: CloudWatch (Container Insights, Alarms, Dashboard)
+- **Monitoring**: CloudWatch (Alarms, Dashboard, Logs)
 
 ## アーキテクチャ
 
@@ -54,7 +53,7 @@ AWS Multi-Account構成のサンプルアプリケーションです。Transit G
 │  ┌─────────────────┐   ┌────────────────┐ │
 │  │ RDS PostgreSQL  │   │ ALB            │ │
 │  │ Multi-AZ        │   │ - Public       │ │
-│  └─────────────────┘   │ - Internal     │ │
+│  └─────────────────┘   │ - Admin        │ │
 │                        └────────────────┘ │
 └─────────────────────────────────────────────┘
 ```
@@ -64,50 +63,82 @@ AWS Multi-Account構成のサンプルアプリケーションです。Transit G
 1. **Public Web Service**
    - 一般ユーザー向けWebアプリケーション
    - インターネット公開（ALB経由）
-   - ポート: 8080
+   - REST API提供
 
 2. **Admin Dashboard Service**
    - 管理者向けダッシュボード
-   - VPN/Direct Connect経由のみアクセス可能
+   - VPN経由のみアクセス可能
    - Internal ALB
-   - ポート: 8080
 
 3. **Batch Processing Service**
    - データ処理・集計バッチ
    - 定期実行（1時間ごと）
-   - ALBなし
+   - 統計レポート生成
 
 ## ディレクトリ構造
 
 ```
 .
 ├── docs/                           # ドキュメント
+│   ├── 01_企画書.md
 │   ├── 02_要件定義書.md
-│   ├── 03_基本設計書.md
-│   └── 04_詳細設計書.md
+│   ├── 03_基本設計書/              # 基本設計（8分割）
+│   │   ├── 00_目次.md
+│   │   ├── 01_システム概要.md
+│   │   ├── 02_アーキテクチャ設計.md
+│   │   ├── 03_インフラ設計.md
+│   │   ├── 04_アプリケーション設計.md
+│   │   ├── 05_セキュリティ設計.md
+│   │   ├── 06_監視・運用設計.md
+│   │   └── 07_非機能要件対応.md
+│   ├── 04_詳細設計書/              # 詳細設計
+│   │   ├── 01_CloudFormation詳細設計.md
+│   │   ├── 02_データベース詳細設計.md
+│   │   ├── 03_アプリケーション詳細設計.md
+│   │   └── 04_監視詳細設計.md
+│   ├── 05_テスト/                  # テストドキュメント
+│   │   ├── 01_テスト計画書.md
+│   │   ├── 02_単体テスト仕様書.md
+│   │   ├── 03_インテグレーションテスト仕様書.md
+│   │   └── 04_E2Eテスト仕様書.md
+│   └── 06_納品物/                  # 納品ドキュメント
+│       ├── 00_納品物一覧.md
+│       ├── 01_セットアップガイド.md
+│       ├── 02_運用マニュアル.md
+│       └── 03_トラブルシューティング.md
 ├── infra/                          # インフラストラクチャコード
-│   ├── platform/                   # Platform Account
-│   │   ├── stack.yaml
-│   │   ├── nested/
-│   │   │   ├── network.yaml
-│   │   │   └── connectivity.yaml
-│   │   ├── parameters-dev.json
-│   │   └── parameters-prod.json
-│   └── service/                    # Service Account
-│       ├── 01-network.yaml
-│       ├── 02-database.yaml
-│       ├── 03-compute.yaml
-│       ├── parameters-dev.json
-│       └── parameters-prod.json
+│   └── cloudformation/
+│       ├── platform/               # Platform Account
+│       │   ├── stack.yaml
+│       │   ├── deploy.sh           # デプロイスクリプト
+│       │   ├── rollback.sh         # ロールバックスクリプト
+│       │   ├── parameters-dev.json
+│       │   └── parameters-prod.json
+│       └── service/                # Service Account
+│           ├── 01-network.yaml
+│           ├── 02-database.yaml
+│           ├── 03-compute.yaml
+│           ├── 04-monitoring.yaml
+│           ├── deploy.sh           # デプロイスクリプト
+│           ├── rollback.sh         # ロールバックスクリプト
+│           ├── parameters-dev.json
+│           └── parameters-prod.json
 ├── app/                            # アプリケーションコード
 │   ├── public/                     # Public Web Service
+│   │   ├── src/
+│   │   ├── Dockerfile
+│   │   └── package.json
 │   ├── admin/                      # Admin Dashboard Service
+│   │   ├── src/
+│   │   ├── Dockerfile
+│   │   └── package.json
 │   ├── batch/                      # Batch Processing Service
+│   │   ├── src/
+│   │   ├── Dockerfile
+│   │   └── package.json
 │   └── shared/                     # 共通ライブラリ
-├── .github/workflows/              # CI/CDパイプライン
-│   ├── deploy.yml
-│   ├── infrastructure.yml
-│   └── pr-validation.yml
+│       ├── db/                     # DB接続・マイグレーション
+│       └── package.json
 └── README.md                       # このファイル
 ```
 
@@ -116,10 +147,9 @@ AWS Multi-Account構成のサンプルアプリケーションです。Transit G
 ### 前提条件
 
 - AWS アカウント 2つ（Platform Account + Service Account）
-- AWS CLI インストール済み
-- Node.js 20 インストール済み
-- Docker インストール済み
-- GitHub アカウント（CI/CD使用時）
+- AWS CLI 2.x以上インストール済み
+- Node.js 20.x インストール済み
+- Docker 24.x以上インストール済み
 
 ### 1. リポジトリのクローン
 
@@ -128,198 +158,198 @@ git clone <repository-url>
 cd sampleAWS
 ```
 
-### 2. インフラストラクチャのデプロイ
-
-詳細は [infra/README.md](infra/README.md) を参照してください。
-
-#### Platform Account
+### 2. Platform Account デプロイ
 
 ```bash
-# S3バケット作成（Nested Templates用）
-aws s3 mb s3://myapp-dev-cfn-templates --region ap-northeast-1
+cd infra/cloudformation/platform
 
-# Nested Templatesアップロード
-aws s3 cp infra/platform/nested/ s3://myapp-dev-cfn-templates/nested/ --recursive
+# AWS CLI プロファイル設定
+export AWS_PROFILE=platform
 
-# スタックデプロイ
-aws cloudformation create-change-set \
-  --stack-name myapp-dev-platform \
-  --change-set-name myapp-dev-platform-changeset-$(date +%Y%m%d%H%M%S) \
-  --template-body file://infra/platform/stack.yaml \
-  --parameters file://infra/platform/parameters-dev.json \
-  --capabilities CAPABILITY_NAMED_IAM \
-  --region ap-northeast-1
-
-# Change Set確認・実行
-aws cloudformation describe-change-set --stack-name myapp-dev-platform --change-set-name <CHANGE_SET_NAME>
-aws cloudformation execute-change-set --stack-name myapp-dev-platform --change-set-name <CHANGE_SET_NAME>
+# デプロイ実行（約10-15分）
+./deploy.sh dev
 ```
 
-#### Service Account
+### 3. Service Account デプロイ
+
+Platform Account の **Transit Gateway ID** を `parameters-dev.json` に設定後：
 
 ```bash
-# Network スタック
-aws cloudformation create-change-set \
-  --stack-name myapp-dev-service-network \
-  --change-set-name myapp-dev-service-network-changeset-$(date +%Y%m%d%H%M%S) \
-  --template-body file://infra/service/01-network.yaml \
-  --parameters file://infra/service/parameters-dev.json \
-  --capabilities CAPABILITY_NAMED_IAM \
-  --region ap-northeast-1
+cd ../service
 
-# Database スタック（Network完了後）
-aws cloudformation create-change-set \
-  --stack-name myapp-dev-service-database \
-  --change-set-name myapp-dev-service-database-changeset-$(date +%Y%m%d%H%M%S) \
-  --template-body file://infra/service/02-database.yaml \
-  --parameters file://infra/service/parameters-dev.json \
-  --capabilities CAPABILITY_NAMED_IAM \
-  --region ap-northeast-1
+# AWS CLI プロファイル設定
+export AWS_PROFILE=service
 
-# Compute スタック（Database完了後）
-aws cloudformation create-change-set \
-  --stack-name myapp-dev-service-compute \
-  --change-set-name myapp-dev-service-compute-changeset-$(date +%Y%m%d%H%M%S) \
-  --template-body file://infra/service/03-compute.yaml \
-  --parameters file://infra/service/parameters-dev.json \
-  --capabilities CAPABILITY_NAMED_IAM \
-  --region ap-northeast-1
+# デプロイ実行（約20-30分）
+./deploy.sh dev
 ```
 
-### 3. アプリケーションのビルドとデプロイ
-
-詳細は [app/README.md](app/README.md) を参照してください。
+### 4. データベースマイグレーション
 
 ```bash
-cd app
+cd ../../../app/shared
 
 # 依存関係インストール
-npm run install:all
+npm install
 
-# Dockerイメージビルド
-npm run docker:build
+# RDS接続情報を環境変数に設定
+export DB_HOST=<RDS_ENDPOINT>
+export DB_PORT=5432
+export DB_NAME=myapp_db
+export DB_USER=appuser
+export DB_PASSWORD=<PASSWORD_FROM_SECRETS_MANAGER>
 
-# ECRプッシュ
-aws ecr get-login-password --region ap-northeast-1 | \
-  docker login --username AWS --password-stdin <AWS_ACCOUNT_ID>.dkr.ecr.ap-northeast-1.amazonaws.com
-
-docker tag myapp-public-web:latest <AWS_ACCOUNT_ID>.dkr.ecr.ap-northeast-1.amazonaws.com/myapp/public-web:latest
-docker push <AWS_ACCOUNT_ID>.dkr.ecr.ap-northeast-1.amazonaws.com/myapp/public-web:latest
-
-# 同様にadmin, batchもプッシュ
+# マイグレーション実行
+npm run migrate:latest
 ```
 
-### 4. 動作確認
+### 5. Dockerイメージビルド＆デプロイ
+
+詳細は [docs/06_納品物/01_セットアップガイド.md](docs/06_納品物/01_セットアップガイド.md) を参照してください。
+
+### 6. 動作確認
 
 ```bash
 # Public Web Service
 curl http://<PUBLIC_ALB_DNS>/health
+# Expected: {"status":"ok"}
 
 # Admin Dashboard Service（VPN経由）
 curl http://<ADMIN_ALB_DNS>/health
-```
-
-## CI/CD
-
-GitHub Actionsによる自動デプロイを構成しています。
-
-詳細は [.github/workflows/README.md](.github/workflows/README.md) を参照してください。
-
-### GitHub Secrets の設定
-
-リポジトリの `Settings` → `Secrets and variables` → `Actions` で以下を登録：
-
-```
-AWS_ACCOUNT_ID=123456789012
-AWS_ACCESS_KEY_ID=AKIA...
-AWS_SECRET_ACCESS_KEY=xxxxx...
-PLATFORM_AWS_ACCESS_KEY_ID=AKIA...
-PLATFORM_AWS_SECRET_ACCESS_KEY=xxxxx...
-SERVICE_AWS_ACCESS_KEY_ID=AKIA...
-SERVICE_AWS_SECRET_ACCESS_KEY=xxxxx...
-```
-
-### 自動デプロイ
-
-`main` ブランチへのマージで自動的にデプロイされます：
-
-```bash
-git checkout main
-git merge feature-branch
-git push origin main
+# Expected: {"status":"ok"}
 ```
 
 ## ドキュメント
 
-- [02_要件定義書.md](docs/02_要件定義書.md) - 機能要件・非機能要件
-- [03_基本設計書.md](docs/03_基本設計書.md) - システムアーキテクチャ設計
-- [04_詳細設計書.md](docs/04_詳細設計書.md) - 実装レベルの詳細設計
-- [infra/README.md](infra/README.md) - インフラデプロイ手順
-- [app/README.md](app/README.md) - アプリケーション開発ガイド
-- [.github/workflows/README.md](.github/workflows/README.md) - CI/CDガイド
+### 企画・設計書
+
+| ドキュメント | 説明 |
+|------------|------|
+| [企画書](docs/01_企画書.md) | プロジェクト概要、目的、スコープ |
+| [要件定義書](docs/02_要件定義書.md) | 機能要件、非機能要件 |
+| [基本設計書](docs/03_基本設計書/00_目次.md) | システムアーキテクチャ設計（8分割） |
+| [詳細設計書](docs/04_詳細設計書/) | CloudFormation、DB、アプリ、監視の詳細設計 |
+
+### テスト・運用
+
+| ドキュメント | 説明 |
+|------------|------|
+| [テスト計画書](docs/05_テスト/01_テスト計画書.md) | テスト戦略、スケジュール |
+| [単体テスト仕様書](docs/05_テスト/02_単体テスト仕様書.md) | 単体テストケース |
+| [インテグレーションテスト仕様書](docs/05_テスト/03_インテグレーションテスト仕様書.md) | API統合テスト |
+| [E2Eテスト仕様書](docs/05_テスト/04_E2Eテスト仕様書.md) | システム全体テスト |
+
+### 納品物
+
+| ドキュメント | 説明 |
+|------------|------|
+| [納品物一覧](docs/06_納品物/00_納品物一覧.md) | 全納品物のリスト |
+| [セットアップガイド](docs/06_納品物/01_セットアップガイド.md) | 環境構築手順（詳細版） |
+| [運用マニュアル](docs/06_納品物/02_運用マニュアル.md) | 日常運用、デプロイ、スケーリング |
+| [トラブルシューティング](docs/06_納品物/03_トラブルシューティング.md) | 障害対応手順、FAQ |
 
 ## コスト見積もり
 
-開発環境（dev）の月額概算：
+### 開発環境（dev）の月額概算
 
 | サービス | 仕様 | 月額（USD） |
 |---------|------|------------|
-| ECS Fargate | 0.5 vCPU, 1GB x 5タスク | $36 |
-| RDS PostgreSQL | db.t3.micro Multi-AZ | $30 |
-| NAT Gateway | 2台 x 730時間 | $65 |
-| Transit Gateway | 1台 + データ転送 | $36 |
-| Application Load Balancer | 2台 | $32 |
-| CloudWatch Logs | 10GB | $5 |
-| **合計** | | **約 $204/月** |
+| ECS Fargate | 0.5 vCPU, 1GB x 3サービス | $25 |
+| RDS PostgreSQL | db.t3.medium Multi-AZ | $100 |
+| Application Load Balancer | 2台（Public + Admin） | $25 |
+| Client VPN | エンドポイント時間課金 | $75 |
+| CloudWatch Logs | 10GB | 含む |
+| **合計** | | **約 $225/月** |
 
-本番環境（prod）：約 $530/月
+### 本番環境（prod）の月額概算
+
+約 $530/月（Auto Scaling、Read Replica等含む）
 
 ## セキュリティ
 
-- すべてのデータは暗号化（RDS, Secrets Manager, KMS）
-- 管理系サービスはVPN/Direct Connect経由のみアクセス可能
-- IAMロールは最小権限の原則に基づいて設定
-- Security Groupで厳密なネットワーク制御
-- Secrets Managerでパスワード自動生成・管理
+- **暗号化**: RDS（KMS）、Secrets Manager、EBS、S3すべて暗号化
+- **ネットワーク分離**: Admin DashboardはVPN経由のみ
+- **最小権限の原則**: IAMロールで厳密な権限管理
+- **監査ログ**: CloudWatch Logs、VPC Flow Logs
+- **シークレット管理**: Secrets Managerで自動ローテーション
 
 ## モニタリング
 
-- CloudWatch Container Insights（ECS）
-- RDS Enhanced Monitoring
-- CloudWatch Alarms（CPU, メモリ, エラー率）
-- SNS通知（Critical/Warning）
+- CloudWatch Alarms（CPU、メモリ、エラー率）
 - CloudWatch Dashboard（統合ビュー）
+- RDS Enhanced Monitoring
+- VPC Flow Logs
+- SNS通知（Critical/Warning）
+
+詳細は [docs/03_基本設計書/06_監視・運用設計.md](docs/03_基本設計書/06_監視・運用設計.md) を参照してください。
+
+## デプロイスクリプト
+
+### Platform Account
+
+```bash
+cd infra/cloudformation/platform
+
+# デプロイ
+./deploy.sh dev
+
+# ロールバック（削除）
+./rollback.sh dev
+```
+
+### Service Account
+
+```bash
+cd infra/cloudformation/service
+
+# デプロイ（4スタック順次）
+./deploy.sh dev
+
+# ロールバック（削除）
+./rollback.sh dev
+```
 
 ## トラブルシューティング
 
-### Transit Gateway接続が確立しない
+詳細は [docs/06_納品物/03_トラブルシューティング.md](docs/06_納品物/03_トラブルシューティング.md) を参照してください。
 
-**原因:** RAM Resource Shareの承認が必要
+### よくある問題
 
-**解決策:**
+#### Transit Gateway接続が確立しない
+
+**原因**: RAM Resource Shareの承認が必要
+
+**解決策**:
 ```bash
 aws ram get-resource-share-invitations --region ap-northeast-1
-aws ram accept-resource-share-invitation --resource-share-invitation-arn <ARN> --region ap-northeast-1
+aws ram accept-resource-share-invitation --resource-share-invitation-arn <ARN>
 ```
 
-### ECS タスクが起動しない
+#### ECS タスクが起動しない
 
-**原因:** 環境変数（Secrets Manager）が取得できない
+**原因**: Secrets Managerが取得できない
 
-**解決策:**
+**解決策**:
 1. Secrets Managerに値が設定されているか確認
 2. IAM Task Execution Roleの権限を確認
-3. ECS タスクログを確認
+3. CloudWatch Logsでエラー確認
 
 ```bash
-aws logs tail /ecs/myapp-dev/public-web --follow --region ap-northeast-1
+aws logs tail /ecs/sample-app-dev/public-web --follow
 ```
 
-### データベース接続エラー
+## 技術スタック詳細
 
-**原因:** Security Groupで通信がブロックされている
-
-**解決策:** Security Groupのインバウンドルールを確認
+| カテゴリ | 技術 | バージョン |
+|---------|------|----------|
+| IaC | CloudFormation | Latest |
+| Compute | ECS Fargate | Latest |
+| Container | Docker | 24.x |
+| Database | PostgreSQL | 14.10 |
+| Runtime | Node.js | 20.x |
+| Framework | Express.js | 4.18.x |
+| ORM | Knex.js | 3.1.x |
+| Monitoring | CloudWatch | Latest |
 
 ## 貢献
 

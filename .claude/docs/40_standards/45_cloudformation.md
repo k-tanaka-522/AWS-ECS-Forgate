@@ -8,20 +8,199 @@
 
 ---
 
-## スタック構成
+## スタック分割の原則
 
-### 推奨パターン（レイヤー別分割）
+### なぜスタックを分割するのか？
+
+**AWS公式推奨**: ライフサイクル・オーナーシップで分割
+
+**理由:**
+1. **疎結合**: チーム間の依存を減らす
+2. **責任分離**: 各チームが独立して更新可能
+3. **変更リスクの最小化**: 影響範囲を限定
+4. **更新頻度の最適化**: 頻繁に変更するリソースを分離
+
+### 分割の基準
+
+| 基準 | 説明 | 例 |
+|------|------|-----|
+| **ライフサイクル** | 更新頻度 | ネットワーク（年単位）vs コンピュート（日単位） |
+| **オーナーシップ** | 責任チーム | インフラチーム vs 開発チーム |
+| **依存関係** | 疎結合 | VPC（独立）vs ECS（VPCに依存） |
+
+### 典型的な分割パターン
+
+```
+✅ 推奨：ライフサイクル別に分割
+
+network-stack          # 更新頻度: 低（数ヶ月〜年単位）
+├── VPC
+├── Subnet
+├── RouteTable
+└── InternetGateway
+
+storage-stack          # 更新頻度: 低〜中（週〜月単位）
+├── RDS
+├── DynamoDB
+└── S3
+
+compute-stack          # 更新頻度: 高（日〜週単位）
+├── ECS Service
+├── ALB
+├── Auto Scaling
+└── Task Definition
+```
+
+**メリット:**
+- ✅ ネットワーク変更時にコンピュートリソースに影響しない
+- ✅ アプリデプロイ時にデータベースに影響しない
+- ✅ チームごとに独立して作業可能
+
+### クロススタック参照（Export/Import）
+
+**network-stack** (Exportする側)
+```yaml
+Outputs:
+  VpcId:
+    Value: !Ref VPC
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-VpcId
+
+  PrivateSubnetIds:
+    Value: !Join [",", [!Ref PrivateSubnet1, !Ref PrivateSubnet2]]
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-PrivateSubnetIds
+```
+
+**compute-stack** (Importする側)
+```yaml
+Resources:
+  ECSService:
+    Type: AWS::ECS::Service
+    Properties:
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets: !Split
+            - ","
+            - !ImportValue
+                Fn::Sub: ${ProjectName}-${Environment}-PrivateSubnetIds
+```
+
+---
+
+## ディレクトリ構造
+
+### 推奨構造（スタック分割 + 環境差分集約）
 
 ```
 infra/cloudformation/
-├── network.yaml       # VPC, Subnet
-├── security.yaml      # SecurityGroup, IAM
-├── database.yaml      # RDS
-└── compute.yaml       # ECS, ALB
+├── stacks/                        # スタック定義（ライフサイクル別）
+│   ├── network/
+│   │   └── main.yaml             # VPC, Subnet, RouteTable
+│   ├── storage/
+│   │   └── main.yaml             # RDS, DynamoDB, S3
+│   └── compute/
+│       └── main.yaml             # ECS, ALB, Auto Scaling
+│
+├── templates/                     # 再利用可能なテンプレート部品
+│   ├── network/
+│   │   ├── vpc.yaml
+│   │   ├── subnet.yaml
+│   │   └── route-table.yaml
+│   ├── storage/
+│   │   ├── rds.yaml
+│   │   ├── dynamodb.yaml
+│   │   └── s3.yaml
+│   └── compute/
+│       ├── ecs-cluster.yaml
+│       ├── ecs-service.yaml
+│       └── alb.yaml
+│
+└── parameters/                    # 環境差分を集約
+    ├── dev.json
+    └── prod.json
 ```
 
-**注意:** これは一般的な推奨パターンです。
-プロジェクトの規模・要件に応じて、設計で適切な構成を決定してください。
+### 使い方
+
+```bash
+# 1. Network Stack（最初、滅多に更新しない）
+aws cloudformation deploy \
+  --stack-name myapp-dev-network \
+  --template-file stacks/network/main.yaml \
+  --parameter-overrides file://parameters/dev.json
+
+# 2. Storage Stack（時々更新）
+aws cloudformation deploy \
+  --stack-name myapp-dev-storage \
+  --template-file stacks/storage/main.yaml \
+  --parameter-overrides file://parameters/dev.json
+
+# 3. Compute Stack（頻繁に更新）
+aws cloudformation deploy \
+  --stack-name myapp-dev-compute \
+  --template-file stacks/compute/main.yaml \
+  --parameter-overrides file://parameters/dev.json
+```
+
+### parameters/dev.json の例（環境差分を集約）
+
+```json
+[
+  {
+    "ParameterKey": "Environment",
+    "ParameterValue": "dev"
+  },
+  {
+    "ParameterKey": "ProjectName",
+    "ParameterValue": "myapp"
+  },
+  {
+    "ParameterKey": "VpcCidr",
+    "ParameterValue": "10.1.0.0/16"
+  },
+  {
+    "ParameterKey": "DBInstanceClass",
+    "ParameterValue": "db.t3.micro"
+  },
+  {
+    "ParameterKey": "ECSTaskCpu",
+    "ParameterValue": "256"
+  }
+]
+```
+
+**すべての環境差分（dev/prod）がこのファイルに集約される**
+
+### 複雑なプロジェクトの場合
+
+Platform Account / Service Account など、複数のAWSアカウントを使用する場合：
+
+```
+infra/cloudformation/
+├── platform/                      # Platform Account用
+│   ├── stacks/
+│   │   ├── network/
+│   │   │   └── main.yaml
+│   │   └── connectivity/
+│   │       └── main.yaml         # TGW, RAM
+│   ├── templates/
+│   │   └── ...
+│   └── parameters/
+│       ├── dev.json
+│       └── prod.json
+│
+└── service/                       # Service Account用
+    ├── stacks/
+    │   ├── network/
+    │   ├── storage/
+    │   └── compute/
+    ├── templates/
+    │   └── ...
+    └── parameters/
+        ├── dev.json
+        └── prod.json
+```
 
 ---
 

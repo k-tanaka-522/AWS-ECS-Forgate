@@ -33,8 +33,8 @@
 ```
 .claude/helpers/state-manager.md                        # 状態管理方法
 .claude/helpers/review-task-generator.md                # レビュータスク生成方法
-.claude/helpers/template-customization-helper.md        # テンプレートカスタマイズ方法
 .claude/helpers/directory-structure-helper.md           # ディレクトリ構成決定方法
+.claude/helpers/implementation-checker.md               # 実装チェッカー
 ```
 
 #### 技術標準

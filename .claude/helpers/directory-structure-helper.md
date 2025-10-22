@@ -184,4 +184,4 @@
 ## 5. 関連ドキュメント
 
 - [18_best-practice-research-flow.md](../.claude/docs/10_facilitation/18_best-practice-research-flow.md) - ベストプラクティス調査フロー
-- [03_design/template.md](../.claude/docs/30_templates/03_design/template.md) - 設計書テンプレート
+- [2.3.6_製造物_詳細設計書構成.md](../.claude/docs/10_facilitation/2.3_設計フェーズ/2.3.6_製造物_詳細設計書構成.md) - 詳細設計書構成
