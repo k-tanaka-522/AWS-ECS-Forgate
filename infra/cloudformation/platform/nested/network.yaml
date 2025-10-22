@@ -51,6 +51,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-platform-vpc
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   # ----------------------------------------------------------------------------
   # Internet Gateway
@@ -63,6 +65,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-platform-igw
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   AttachGateway:
     Type: AWS::EC2::VPCGatewayAttachment
@@ -85,6 +89,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-platform-public-subnet-1
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   PublicSubnet2:
     Type: AWS::EC2::Subnet
@@ -98,6 +104,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-platform-public-subnet-2
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   # ----------------------------------------------------------------------------
   # Private Subnets
@@ -113,6 +121,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-platform-private-subnet-1
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   PrivateSubnet2:
     Type: AWS::EC2::Subnet
@@ -125,6 +135,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-platform-private-subnet-2
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   # ----------------------------------------------------------------------------
   # NAT Gateway (for Private Subnets)
@@ -139,6 +151,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-platform-nat-eip
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   NATGateway:
     Type: AWS::EC2::NatGateway
@@ -150,6 +164,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-platform-nat-gw
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   # ----------------------------------------------------------------------------
   # Route Tables
@@ -163,6 +179,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-platform-public-rt
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   PublicRoute:
     Type: AWS::EC2::Route
@@ -193,6 +211,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-platform-private-rt-1
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   PrivateRoute1:
     Type: AWS::EC2::Route
@@ -216,6 +236,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-platform-private-rt-2
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   PrivateRoute2:
     Type: AWS::EC2::Route

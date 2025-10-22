@@ -62,6 +62,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-public-web-ecr
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   AdminDashboardECRRepository:
     Type: AWS::ECR::Repository
@@ -94,6 +96,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-admin-dashboard-ecr
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   BatchProcessingECRRepository:
     Type: AWS::ECR::Repository
@@ -126,6 +130,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-batch-processing-ecr
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   # ----------------------------------------------------------------------------
   # Security Groups
@@ -141,6 +147,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-ecs-sg
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   ECSSecurityGroupIngressFromALB:
     Type: AWS::EC2::SecurityGroupIngress
@@ -186,6 +194,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-alb-sg
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   # Export ECS Security Group for database stack
   ECSSecurityGroupExport:
@@ -216,6 +226,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-alb
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   # Target Groups
   PublicWebTargetGroup:
@@ -241,6 +253,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-public-web-tg
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   AdminDashboardTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
@@ -265,6 +279,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-admin-tg
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   # Listeners
   ALBListenerHTTP:
@@ -315,6 +331,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-cluster
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   # ----------------------------------------------------------------------------
   # CloudWatch Log Groups
@@ -368,6 +386,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-ecs-task-execution-role
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   ECSTaskRole:
     Type: AWS::IAM::Role
@@ -404,6 +424,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-ecs-task-role
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   # ----------------------------------------------------------------------------
   # ECS Task Definitions
@@ -459,6 +481,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-public-web-task
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   AdminDashboardTaskDefinition:
     Type: AWS::ECS::TaskDefinition
@@ -511,6 +535,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-admin-dashboard-task
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   BatchProcessingTaskDefinition:
     Type: AWS::ECS::TaskDefinition
@@ -558,6 +584,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-batch-processing-task
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   # ----------------------------------------------------------------------------
   # ECS Services
@@ -589,6 +617,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-public-web-service
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   AdminDashboardService:
     Type: AWS::ECS::Service
@@ -617,6 +647,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-admin-dashboard-service
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   # ----------------------------------------------------------------------------
   # EventBridge Rules for Scheduled Batch Tasks

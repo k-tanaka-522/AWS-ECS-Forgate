@@ -615,24 +615,47 @@ infra/
 
 ### 10.2 推定行数と分割理由
 
-| ファイル | 推定行数 | 判定 | 理由・対応 |
-|---------|---------|------|-----------|
-| platform/stack.yaml | 200行 | ✅ 適合 | ネストスタックの統合管理のみ、シンプル |
-| platform/nested/network.yaml | 200行 | ✅ 適合 | VPC、サブネット、NAT Gateway |
-| platform/nested/connectivity.yaml | 220行 | ✅ 適合 | Transit Gateway、Client VPN |
-| service/01-network.yaml | 280行 | ✅ 適合 | Service VPC、TGW Attachment、ルート設定 |
-| service/02-database.yaml | 240行 | ✅ 適合 | RDS、Secrets Manager、KMS |
-| service/03-compute.yaml | **700行** | ⚠️ 超過 | 3サービス（Public/Admin/Batch）含む |
-| service/04-monitoring.yaml | **500行** | ⚠️ 超過 | 約20個のAlarm + Dashboard |
+| ファイル | 推定行数 | 実測行数 | 判定 | 理由・対応 |
+|---------|---------|---------|------|-----------|
+| platform/stack.yaml | 200行 | 138行 | ✅ 適合 | ネストスタックの統合管理のみ、シンプル |
+| platform/nested/network.yaml | 200行 | 263行 | ✅ 適合 | VPC、サブネット、NAT Gateway |
+| platform/nested/connectivity.yaml | 220行 | 219行 | ✅ 適合 | Transit Gateway、Client VPN |
+| service/01-network.yaml | 280行 | 435行 | ⚠️ 45%超過 | Service VPC、TGW Attachment、ルート設定、6サブネット含む |
+| service/02-database.yaml | 240行 | 217行 | ✅ 適合 | RDS、Secrets Manager、KMS |
+| service/03-compute.yaml | **700行** | **728行** | ⚠️ 143%超過 | 3サービス（Public/Admin/Batch）含む |
+| service/04-monitoring.yaml | **500行** | **536行** | ⚠️ 79%超過 | 約20個のAlarm + Dashboard |
 
 **300行超過ファイルの対応方針**:
 
-#### service/03-compute.yaml（700行）
+#### service/01-network.yaml（435行、45%超過）
+
+**超過理由**:
+- Service VPC + 6つのサブネット（Public x2、Private x2、Database x2）
+- NAT Gateway、Internet Gateway、Route Tables（4個）
+- Transit Gateway Attachment + ルート設定
+- VPC Flow Logs + IAM Role
+- 実測: 435行（推定280行から+155行）
+
+**現時点の判断**:
+- ✅ **検証・デモ用のため、1ファイルで実装**
+- 理由: ネットワーク構成は一括で確認したい、サブネット数が多いが密結合
+
+**将来的な改善案（本番化時）**:
+```
+service/
+├── 01-network.yaml          # 親スタック（150行）
+└── nested/
+    ├── vpc-subnets.yaml     # VPC、サブネット（200行）
+    └── tgw-routing.yaml     # TGW、ルーティング（150行）
+```
+
+#### service/03-compute.yaml（728行、143%超過）
 
 **超過理由**:
 - 3つのサービス（Public Web、Admin、Batch）を含む
-- 各サービスごとにTask Definition、Service、ALB、Target Group、Auto Scalingが必要
-- 単純計算: 1サービス約230行 x 3 = 690行
+- 各サービスごとにTask Definition、Service、ALB、Target Group、EventBridgeルールが必要
+- 含まれるリソース: 3 ECR、2 SecurityGroup、ALB、2 TargetGroup、2 Listener、ECSクラスター、3 TaskDefinition、2 Service、2 EventBridgeルール
+- 実測: 728行（推定700行から+28行）
 
 **現時点の判断**:
 - ✅ **検証・デモ用のため、1ファイルで実装**
@@ -649,12 +672,15 @@ service/
     └── ecs-batch.yaml       # Batch Processing（150行）
 ```
 
-#### service/04-monitoring.yaml（500行）
+#### service/04-monitoring.yaml（536行、79%超過）
 
 **超過理由**:
-- 約20個のCloudWatch Alarmを定義（各20行）
-- CloudWatch Dashboard（80行）
-- SNS Topics（20行）
+- 約20個のCloudWatch Alarmを定義（各15-25行）
+- CloudWatch Dashboard（約100行）
+- SNS Topics（2個、各30行）
+- Metric Filters + Alarms（2個）
+- AWS Budgets（1個）
+- 実測: 536行（推定500行から+36行）
 
 **現時点の判断**:
 - ✅ **検証・デモ用のため、1ファイルで実装**

@@ -79,6 +79,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-service-vpc
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   # ----------------------------------------------------------------------------
   # Internet Gateway
@@ -91,6 +93,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-service-igw
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   AttachGateway:
     Type: AWS::EC2::VPCGatewayAttachment
@@ -113,6 +117,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-service-public-subnet-1
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   PublicSubnet2:
     Type: AWS::EC2::Subnet
@@ -126,6 +132,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-service-public-subnet-2
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   # ----------------------------------------------------------------------------
   # Private Subnets (for ECS Fargate)
@@ -141,6 +149,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-service-private-subnet-1
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   PrivateSubnet2:
     Type: AWS::EC2::Subnet
@@ -153,6 +163,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-service-private-subnet-2
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   # ----------------------------------------------------------------------------
   # Database Subnets (for RDS)
@@ -168,6 +180,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-service-db-subnet-1
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   DatabaseSubnet2:
     Type: AWS::EC2::Subnet
@@ -180,6 +194,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-service-db-subnet-2
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   # ----------------------------------------------------------------------------
   # NAT Gateway
@@ -194,6 +210,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-service-nat-eip
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   NATGateway:
     Type: AWS::EC2::NatGateway
@@ -205,6 +223,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-service-nat-gw
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   # ----------------------------------------------------------------------------
   # Route Tables
@@ -218,6 +238,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-service-public-rt
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   PublicRoute:
     Type: AWS::EC2::Route
@@ -248,6 +270,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-service-private-rt-1
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   PrivateRoute1:
     Type: AWS::EC2::Route
@@ -271,6 +295,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-service-private-rt-2
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   PrivateRoute2:
     Type: AWS::EC2::Route
@@ -294,6 +320,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-service-db-rt
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   DatabaseSubnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
@@ -323,6 +351,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-service-tgw-attachment
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   # Transit Gateway Routes (to Platform VPC)
   TGWRoutePrivate1:
@@ -387,6 +417,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-service-vpc-flow-log
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
 # ==============================================================================
 # Outputs

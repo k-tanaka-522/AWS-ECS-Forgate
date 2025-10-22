@@ -68,6 +68,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-db-sg
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   # ----------------------------------------------------------------------------
   # DB Subnet Group
@@ -85,6 +87,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-db-subnet-group
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   # ----------------------------------------------------------------------------
   # KMS Key for RDS Encryption
@@ -116,6 +120,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-db-encryption-key
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   DBEncryptionKeyAlias:
     Type: AWS::KMS::Alias
@@ -159,6 +165,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-db
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   # ----------------------------------------------------------------------------
   # Secrets Manager Secret for Application (includes DB endpoint)
@@ -181,6 +189,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-db-connection
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
 # ==============================================================================
 # Outputs

@@ -70,6 +70,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-tgw
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   # Platform VPC Attachment
   PlatformVPCAttachment:
@@ -85,6 +87,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-platform-tgw-attachment
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   # Transit Gateway Route (Platform VPC Private Subnets)
   TGWRoutePrivate1:
@@ -119,6 +123,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-tgw-share
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   # ----------------------------------------------------------------------------
   # Client VPN Endpoint
@@ -159,6 +165,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-client-vpn
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   # Client VPN Target Network Association
   ClientVpnTargetNetworkAssociation1:

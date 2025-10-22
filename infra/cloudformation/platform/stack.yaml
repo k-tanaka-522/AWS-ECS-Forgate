@@ -84,6 +84,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-network-stack
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   # ----------------------------------------------------------------------------
   # Connectivity Stack (Transit Gateway, Client VPN)
@@ -110,6 +112,8 @@ Resources:
           Value: !Sub ${ProjectName}-${Environment}-connectivity-stack
         - Key: Environment
           Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
 # ==============================================================================
 # Outputs

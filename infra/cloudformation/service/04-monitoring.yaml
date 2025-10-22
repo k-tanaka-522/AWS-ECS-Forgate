@@ -43,6 +43,13 @@ Resources:
       Subscription:
         - Endpoint: !Ref CriticalAlertEmail
           Protocol: email
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-CriticalAlert
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   AlertTopic:
     Type: AWS::SNS::Topic
@@ -52,6 +59,13 @@ Resources:
       Subscription:
         - Endpoint: !Ref AlertEmail
           Protocol: email
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-Alert
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   # ----------------------------------------------------------------------------
   # ECS Alarms
