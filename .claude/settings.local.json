@@ -10,9 +10,7 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(git push:*)",
-      "Bash(for f in \"C:\\dev2\\sampleAWS\\app\\public\\src\\index.js\" \"C:\\dev2\\sampleAWS\\app\\admin\\src\\index.js\" \"C:\\dev2\\sampleAWS\\app\\batch\\src\\index.js\")",
-      "Bash(do wc -l \"$f\")",
-      "Bash(done)"
+      "Bash(git rm:*)"
     ],
     "deny": [],
     "ask": []
