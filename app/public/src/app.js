@@ -1,171 +1,264 @@
-/**
- * Public Web Service - Express Application
- *
- * 目的: HTTPリクエストハンドリング、ルーティング
- */
-
 const express = require('express');
-const { db } = require('@myapp/shared');
-
-const app = express();
-
-// Middleware
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-// リクエストロギング
-app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} ${req.method} ${req.path}`);
-  next();
-});
+const helmet = require('helmet');
+const cors = require('cors');
+const compression = require('compression');
+const { logger, db } = require('@sample-app/shared');
 
 /**
- * ヘルスチェックエンドポイント
- * ALBとECSのヘルスチェックで使用
+ * Create and configure Express application
+ * @returns {express.Application}
  */
-app.get('/health', async (req, res) => {
-  try {
-    // データベース接続確認
-    const pool = db.getPool();
-    await pool.query('SELECT 1');
+function createApp() {
+  const app = express();
 
-    res.status(200).json({
-      status: 'healthy',
-      service: 'public-web',
-      timestamp: new Date().toISOString(),
-      database: 'connected'
-    });
-  } catch (error) {
-    console.error('Health check failed:', error);
-    res.status(503).json({
-      status: 'unhealthy',
-      service: 'public-web',
-      timestamp: new Date().toISOString(),
-      error: error.message
-    });
-  }
-});
+  // Security middleware
+  app.use(helmet());
 
-/**
- * ルートエンドポイント
- */
-app.get('/', (req, res) => {
-  res.json({
-    service: 'Public Web Application',
-    version: '1.0.0',
-    environment: process.env.NODE_ENV || 'production',
-    message: 'Welcome to the public web service'
+  // CORS configuration
+  app.use(
+    cors({
+      origin: process.env.CORS_ORIGIN || '*',
+      methods: ['GET', 'POST', 'PUT', 'DELETE'],
+      allowedHeaders: ['Content-Type', 'Authorization'],
+    })
+  );
+
+  // Compression middleware
+  app.use(compression());
+
+  // Body parser
+  app.use(express.json({ limit: '10mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+  // Request logging middleware
+  app.use((req, res, next) => {
+    const start = Date.now();
+    res.on('finish', () => {
+      const duration = Date.now() - start;
+      logger.info('HTTP Request', {
+        method: req.method,
+        path: req.path,
+        statusCode: res.statusCode,
+        duration: `${duration}ms`,
+        ip: req.ip,
+        userAgent: req.get('user-agent'),
+      });
+    });
+    next();
   });
-});
 
-/**
- * ユーザー一覧取得エンドポイント（サンプル）
- */
-app.get('/api/users', async (req, res) => {
-  try {
-    const result = await db.query('SELECT id, username, email, created_at FROM users ORDER BY created_at DESC LIMIT 10');
+  // Health check endpoint
+  app.get('/health', async (req, res) => {
+    try {
+      const dbConnected = await db.testConnection();
+      const poolStats = db.getStats();
 
-    res.json({
-      success: true,
-      count: result.rowCount,
-      data: result.rows
-    });
-  } catch (error) {
-    console.error('Error fetching users:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error'
-    });
-  }
-});
+      const health = {
+        status: dbConnected ? 'healthy' : 'unhealthy',
+        timestamp: new Date().toISOString(),
+        service: 'public-web',
+        database: {
+          connected: dbConnected,
+          pool: poolStats,
+        },
+        uptime: process.uptime(),
+        memory: process.memoryUsage(),
+      };
 
-/**
- * ユーザー登録エンドポイント（サンプル）
- */
-app.post('/api/users', async (req, res) => {
-  try {
-    const { username, email } = req.body;
-
-    // バリデーション
-    if (!username || !email) {
-      return res.status(400).json({
-        success: false,
-        error: 'Username and email are required'
+      const statusCode = dbConnected ? 200 : 503;
+      res.status(statusCode).json(health);
+    } catch (error) {
+      logger.error('Health check failed', { error: error.message });
+      res.status(503).json({
+        status: 'unhealthy',
+        error: error.message,
       });
     }
+  });
 
-    // ユーザー作成
-    const result = await db.query(
-      'INSERT INTO users (username, email) VALUES ($1, $2) RETURNING id, username, email, created_at',
-      [username, email]
-    );
+  // API Routes
+  // GET /api/users - List all users
+  app.get('/api/users', async (req, res) => {
+    try {
+      const result = await db.query(
+        'SELECT id, username, email, created_at, updated_at FROM users ORDER BY created_at DESC LIMIT 100'
+      );
 
-    res.status(201).json({
-      success: true,
-      data: result.rows[0]
-    });
-  } catch (error) {
-    console.error('Error creating user:', error);
-
-    // 重複エラー
-    if (error.code === '23505') {
-      return res.status(409).json({
+      res.json({
+        success: true,
+        data: result.rows,
+        count: result.rowCount,
+      });
+    } catch (error) {
+      logger.error('Failed to fetch users', { error: error.message });
+      res.status(500).json({
         success: false,
-        error: 'User already exists'
+        error: 'Failed to fetch users',
       });
     }
+  });
 
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error'
-    });
-  }
-});
+  // POST /api/users - Create new user
+  app.post('/api/users', async (req, res) => {
+    try {
+      const { username, email } = req.body;
 
-/**
- * 統計情報エンドポイント（サンプル）
- */
-app.get('/api/stats', async (req, res) => {
-  try {
-    const userCount = await db.query('SELECT COUNT(*) FROM users');
-    const orderCount = await db.query('SELECT COUNT(*) FROM orders');
-
-    res.json({
-      success: true,
-      data: {
-        totalUsers: parseInt(userCount.rows[0].count, 10),
-        totalOrders: parseInt(orderCount.rows[0].count, 10),
-        timestamp: new Date().toISOString()
+      // Validation
+      if (!username || !email) {
+        return res.status(400).json({
+          success: false,
+          error: 'Username and email are required',
+        });
       }
+
+      // Email format validation
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid email format',
+        });
+      }
+
+      const result = await db.query(
+        'INSERT INTO users (username, email) VALUES ($1, $2) RETURNING id, username, email, created_at',
+        [username, email]
+      );
+
+      logger.info('User created', {
+        userId: result.rows[0].id,
+        username,
+      });
+
+      res.status(201).json({
+        success: true,
+        data: result.rows[0],
+      });
+    } catch (error) {
+      // Handle unique constraint violation
+      if (error.code === '23505') {
+        return res.status(409).json({
+          success: false,
+          error: 'Username or email already exists',
+        });
+      }
+
+      logger.error('Failed to create user', { error: error.message });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to create user',
+      });
+    }
+  });
+
+  // GET /api/users/:id - Get user by ID
+  app.get('/api/users/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      const result = await db.query(
+        'SELECT id, username, email, created_at, updated_at FROM users WHERE id = $1',
+        [id]
+      );
+
+      if (result.rowCount === 0) {
+        return res.status(404).json({
+          success: false,
+          error: 'User not found',
+        });
+      }
+
+      res.json({
+        success: true,
+        data: result.rows[0],
+      });
+    } catch (error) {
+      logger.error('Failed to fetch user', {
+        userId: req.params.id,
+        error: error.message,
+      });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch user',
+      });
+    }
+  });
+
+  // GET /api/stats - Get statistics
+  app.get('/api/stats', async (req, res) => {
+    try {
+      const result = await db.query(
+        'SELECT metric_name, metric_value, recorded_at FROM stats ORDER BY recorded_at DESC LIMIT 100'
+      );
+
+      res.json({
+        success: true,
+        data: result.rows,
+        count: result.rowCount,
+      });
+    } catch (error) {
+      logger.error('Failed to fetch stats', { error: error.message });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch stats',
+      });
+    }
+  });
+
+  // POST /api/stats - Record new statistic
+  app.post('/api/stats', async (req, res) => {
+    try {
+      const { metric_name, metric_value } = req.body;
+
+      if (!metric_name || metric_value === undefined) {
+        return res.status(400).json({
+          success: false,
+          error: 'metric_name and metric_value are required',
+        });
+      }
+
+      const result = await db.query(
+        'INSERT INTO stats (metric_name, metric_value) VALUES ($1, $2) RETURNING id, metric_name, metric_value, recorded_at',
+        [metric_name, metric_value]
+      );
+
+      res.status(201).json({
+        success: true,
+        data: result.rows[0],
+      });
+    } catch (error) {
+      logger.error('Failed to record stat', { error: error.message });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to record stat',
+      });
+    }
+  });
+
+  // 404 handler
+  app.use((req, res) => {
+    res.status(404).json({
+      success: false,
+      error: 'Not found',
     });
-  } catch (error) {
-    console.error('Error fetching stats:', error);
+  });
+
+  // Error handler
+  app.use((err, req, res, next) => {
+    logger.error('Unhandled error', {
+      error: err.message,
+      stack: err.stack,
+      path: req.path,
+      method: req.method,
+    });
+
     res.status(500).json({
       success: false,
-      error: 'Internal server error'
+      error: 'Internal server error',
     });
-  }
-});
-
-/**
- * 404 Not Found
- */
-app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    error: 'Not Found'
   });
-});
 
-/**
- * エラーハンドリングミドルウェア
- */
-app.use((err, req, res, next) => {
-  console.error('Unhandled error:', err);
-  res.status(500).json({
-    success: false,
-    error: 'Internal server error'
-  });
-});
+  return app;
+}
 
-module.exports = app;
+module.exports = createApp;

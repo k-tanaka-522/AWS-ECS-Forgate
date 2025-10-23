@@ -1,227 +1,265 @@
+const { logger, db } = require('@sample-app/shared');
+
 /**
- * Batch Processing Service - Entry Point
+ * Batch Processing Service
+ * Scheduled to run daily at 3:00 AM JST via EventBridge
  *
- * 目的: データ処理・集計バッチ（定期実行）
- * 構成: Node.js + PostgreSQL
- * デプロイ: ECS Fargate (Scheduled Task or Long-running)
+ * Tasks:
+ * 1. Aggregate daily statistics
+ * 2. Clean up old data (older than 90 days)
+ * 3. Generate summary reports
  */
 
-const { db } = require('@myapp/shared');
-
-const SERVICE_NAME = process.env.SERVICE_NAME || 'batch-processing';
-const NODE_ENV = process.env.NODE_ENV || 'production';
-const BATCH_INTERVAL = parseInt(process.env.BATCH_INTERVAL || '3600000', 10); // Default: 1 hour
-
 /**
- * データ集計処理
- * 例: 日次統計情報の集計
+ * Aggregate daily statistics
  */
 async function aggregateDailyStats() {
-  const startTime = Date.now();
-  console.log(`[${SERVICE_NAME}] Starting daily stats aggregation...`);
+  logger.info('Starting daily statistics aggregation');
 
   try {
-    // トランザクション開始
-    const client = await db.getPool().connect();
+    // Count total users
+    const userCountResult = await db.query('SELECT COUNT(*) as count FROM users');
+    const userCount = parseInt(userCountResult.rows[0].count, 10);
 
-    try {
-      await client.query('BEGIN');
+    // Record user count statistic
+    await db.query(
+      'INSERT INTO stats (metric_name, metric_value) VALUES ($1, $2)',
+      ['daily_user_count', userCount]
+    );
 
-      // 本日の統計を集計
-      const today = new Date().toISOString().split('T')[0];
+    // Count users created today
+    const newUsersResult = await db.query(
+      "SELECT COUNT(*) as count FROM users WHERE created_at >= CURRENT_DATE"
+    );
+    const newUsersCount = parseInt(newUsersResult.rows[0].count, 10);
 
-      // ユーザー統計
-      const userStats = await client.query(`
-        INSERT INTO daily_stats (date, metric_name, metric_value)
-        VALUES ($1, 'total_users', (SELECT COUNT(*) FROM users))
-        ON CONFLICT (date, metric_name) DO UPDATE SET metric_value = EXCLUDED.metric_value
-        RETURNING *
-      `, [today]);
+    await db.query(
+      'INSERT INTO stats (metric_name, metric_value) VALUES ($1, $2)',
+      ['daily_new_users', newUsersCount]
+    );
 
-      // 注文統計
-      const orderStats = await client.query(`
-        INSERT INTO daily_stats (date, metric_name, metric_value)
-        VALUES ($1, 'total_orders', (SELECT COUNT(*) FROM orders WHERE DATE(created_at) = $1))
-        ON CONFLICT (date, metric_name) DO UPDATE SET metric_value = EXCLUDED.metric_value
-        RETURNING *
-      `, [today]);
+    // Count stats recorded today
+    const statsCountResult = await db.query(
+      "SELECT COUNT(*) as count FROM stats WHERE recorded_at >= CURRENT_DATE"
+    );
+    const statsCount = parseInt(statsCountResult.rows[0].count, 10);
 
-      // 売上統計
-      const revenueStats = await client.query(`
-        INSERT INTO daily_stats (date, metric_name, metric_value)
-        VALUES ($1, 'total_revenue', (SELECT COALESCE(SUM(total_amount), 0) FROM orders WHERE DATE(created_at) = $1))
-        ON CONFLICT (date, metric_name) DO UPDATE SET metric_value = EXCLUDED.metric_value
-        RETURNING *
-      `, [today]);
+    await db.query(
+      'INSERT INTO stats (metric_name, metric_value) VALUES ($1, $2)',
+      ['daily_stats_count', statsCount]
+    );
 
-      await client.query('COMMIT');
+    logger.info('Daily statistics aggregated', {
+      userCount,
+      newUsersCount,
+      statsCount,
+    });
 
-      const duration = Date.now() - startTime;
-      console.log(`[${SERVICE_NAME}] Daily stats aggregation completed in ${duration}ms`);
-      console.log(`[${SERVICE_NAME}] Aggregated: ${userStats.rowCount} user stats, ${orderStats.rowCount} order stats, ${revenueStats.rowCount} revenue stats`);
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+    return {
+      success: true,
+      userCount,
+      newUsersCount,
+      statsCount,
+    };
   } catch (error) {
-    console.error(`[${SERVICE_NAME}] Error during daily stats aggregation:`, error);
+    logger.error('Failed to aggregate daily statistics', {
+      error: error.message,
+      stack: error.stack,
+    });
     throw error;
   }
 }
 
 /**
- * データクリーンアップ処理
- * 例: 古いログの削除
+ * Clean up old data (older than 90 days)
  */
 async function cleanupOldData() {
-  const startTime = Date.now();
-  console.log(`[${SERVICE_NAME}] Starting old data cleanup...`);
+  logger.info('Starting old data cleanup');
 
   try {
-    // 90日以上前のログを削除
-    const result = await db.query(`
-      DELETE FROM audit_logs
-      WHERE created_at < NOW() - INTERVAL '90 days'
+    const daysToKeep = 90;
+
+    // Delete old stats
+    const statsResult = await db.query(
+      "DELETE FROM stats WHERE recorded_at < NOW() - INTERVAL '90 days' RETURNING id"
+    );
+
+    const deletedStatsCount = statsResult.rowCount;
+
+    logger.info('Old data cleaned up', {
+      deletedStatsCount,
+      daysToKeep,
+    });
+
+    // Record cleanup statistic
+    await db.query(
+      'INSERT INTO stats (metric_name, metric_value) VALUES ($1, $2)',
+      ['cleanup_deleted_stats', deletedStatsCount]
+    );
+
+    return {
+      success: true,
+      deletedStatsCount,
+    };
+  } catch (error) {
+    logger.error('Failed to clean up old data', {
+      error: error.message,
+      stack: error.stack,
+    });
+    throw error;
+  }
+}
+
+/**
+ * Generate summary report
+ */
+async function generateSummaryReport() {
+  logger.info('Generating summary report');
+
+  try {
+    // Get aggregated statistics by metric name
+    const metricsResult = await db.query(`
+      SELECT
+        metric_name,
+        COUNT(*) as count,
+        AVG(metric_value) as avg_value,
+        MIN(metric_value) as min_value,
+        MAX(metric_value) as max_value,
+        MIN(recorded_at) as first_recorded,
+        MAX(recorded_at) as last_recorded
+      FROM stats
+      WHERE recorded_at >= NOW() - INTERVAL '7 days'
+      GROUP BY metric_name
+      ORDER BY count DESC
     `);
 
-    const duration = Date.now() - startTime;
-    console.log(`[${SERVICE_NAME}] Old data cleanup completed in ${duration}ms`);
-    console.log(`[${SERVICE_NAME}] Deleted ${result.rowCount} old audit log records`);
-  } catch (error) {
-    console.error(`[${SERVICE_NAME}] Error during old data cleanup:`, error);
-    throw error;
-  }
-}
-
-/**
- * レポート生成処理
- * 例: 月次レポートの生成
- */
-async function generateMonthlyReport() {
-  const startTime = Date.now();
-  console.log(`[${SERVICE_NAME}] Starting monthly report generation...`);
-
-  try {
-    const lastMonth = new Date();
-    lastMonth.setMonth(lastMonth.getMonth() - 1);
-    const yearMonth = `${lastMonth.getFullYear()}-${String(lastMonth.getMonth() + 1).padStart(2, '0')}`;
-
-    // 月次統計を集計
-    const result = await db.query(`
-      INSERT INTO monthly_reports (year_month, total_users, total_orders, total_revenue, generated_at)
+    // Get user growth statistics
+    const userGrowthResult = await db.query(`
       SELECT
-        $1,
-        (SELECT COUNT(*) FROM users WHERE DATE_TRUNC('month', created_at) = DATE_TRUNC('month', $2::date)),
-        (SELECT COUNT(*) FROM orders WHERE DATE_TRUNC('month', created_at) = DATE_TRUNC('month', $2::date)),
-        (SELECT COALESCE(SUM(total_amount), 0) FROM orders WHERE DATE_TRUNC('month', created_at) = DATE_TRUNC('month', $2::date)),
-        NOW()
-      ON CONFLICT (year_month) DO UPDATE SET
-        total_users = EXCLUDED.total_users,
-        total_orders = EXCLUDED.total_orders,
-        total_revenue = EXCLUDED.total_revenue,
-        generated_at = EXCLUDED.generated_at
-      RETURNING *
-    `, [yearMonth, `${yearMonth}-01`]);
+        DATE(created_at) as date,
+        COUNT(*) as new_users
+      FROM users
+      WHERE created_at >= NOW() - INTERVAL '7 days'
+      GROUP BY DATE(created_at)
+      ORDER BY date DESC
+    `);
 
-    const duration = Date.now() - startTime;
-    console.log(`[${SERVICE_NAME}] Monthly report generation completed in ${duration}ms`);
-    console.log(`[${SERVICE_NAME}] Report for ${yearMonth}:`, result.rows[0]);
+    const report = {
+      generatedAt: new Date().toISOString(),
+      period: 'Last 7 days',
+      metrics: metricsResult.rows,
+      userGrowth: userGrowthResult.rows,
+    };
+
+    logger.info('Summary report generated', {
+      metricsCount: metricsResult.rowCount,
+      userGrowthDays: userGrowthResult.rowCount,
+    });
+
+    // Log the report (in production, this would be sent to S3 or CloudWatch)
+    logger.info('Summary Report', { report: JSON.stringify(report, null, 2) });
+
+    return report;
   } catch (error) {
-    console.error(`[${SERVICE_NAME}] Error during monthly report generation:`, error);
+    logger.error('Failed to generate summary report', {
+      error: error.message,
+      stack: error.stack,
+    });
     throw error;
   }
 }
 
 /**
- * バッチ処理実行
+ * Main batch processing function
  */
-async function runBatch() {
-  console.log(`[${SERVICE_NAME}] ========================================`);
-  console.log(`[${SERVICE_NAME}] Batch execution started at ${new Date().toISOString()}`);
+async function runBatchProcessing() {
+  const startTime = Date.now();
+  logger.info('Batch processing started');
+
+  let results = {
+    success: false,
+    tasks: {},
+    duration: 0,
+    errors: [],
+  };
 
   try {
-    // 各バッチ処理を実行
-    await aggregateDailyStats();
-    await cleanupOldData();
+    // Initialize database connection
+    db.initialize();
 
-    // 月初のみ月次レポート生成
-    const today = new Date().getDate();
-    if (today === 1) {
-      await generateMonthlyReport();
+    // Test database connection
+    const isConnected = await db.testConnection();
+    if (!isConnected) {
+      throw new Error('Failed to connect to database');
     }
 
-    console.log(`[${SERVICE_NAME}] All batch processes completed successfully`);
+    // Run batch tasks sequentially
+    try {
+      results.tasks.aggregateStats = await aggregateDailyStats();
+    } catch (error) {
+      results.errors.push({
+        task: 'aggregateStats',
+        error: error.message,
+      });
+    }
+
+    try {
+      results.tasks.cleanupOldData = await cleanupOldData();
+    } catch (error) {
+      results.errors.push({
+        task: 'cleanupOldData',
+        error: error.message,
+      });
+    }
+
+    try {
+      results.tasks.generateReport = await generateSummaryReport();
+    } catch (error) {
+      results.errors.push({
+        task: 'generateReport',
+        error: error.message,
+      });
+    }
+
+    // Close database connection
+    await db.close();
+
+    results.success = results.errors.length === 0;
+    results.duration = Date.now() - startTime;
+
+    logger.info('Batch processing completed', {
+      success: results.success,
+      duration: `${results.duration}ms`,
+      tasksCompleted: Object.keys(results.tasks).length,
+      errors: results.errors.length,
+    });
+
+    // Exit with appropriate code
+    process.exit(results.success ? 0 : 1);
   } catch (error) {
-    console.error(`[${SERVICE_NAME}] Batch execution failed:`, error);
-  }
+    results.errors.push({
+      task: 'main',
+      error: error.message,
+    });
 
-  console.log(`[${SERVICE_NAME}] ========================================`);
-}
+    logger.error('Batch processing failed', {
+      error: error.message,
+      stack: error.stack,
+      duration: `${Date.now() - startTime}ms`,
+    });
 
-/**
- * メイン処理
- */
-async function main() {
-  console.log(`[${SERVICE_NAME}] Service started`);
-  console.log(`[${SERVICE_NAME}] Environment: ${NODE_ENV}`);
-  console.log(`[${SERVICE_NAME}] Batch interval: ${BATCH_INTERVAL}ms`);
+    // Ensure database connection is closed
+    try {
+      await db.close();
+    } catch (closeError) {
+      logger.error('Failed to close database connection', {
+        error: closeError.message,
+      });
+    }
 
-  try {
-    // データベース接続確認
-    console.log(`[${SERVICE_NAME}] Connecting to database...`);
-    await db.getConnection();
-    console.log(`[${SERVICE_NAME}] Database connection established`);
-
-    // 初回実行
-    await runBatch();
-
-    // 定期実行
-    setInterval(async () => {
-      try {
-        await runBatch();
-      } catch (error) {
-        console.error(`[${SERVICE_NAME}] Scheduled batch execution failed:`, error);
-      }
-    }, BATCH_INTERVAL);
-
-    console.log(`[${SERVICE_NAME}] Batch scheduler initialized (interval: ${BATCH_INTERVAL}ms)`);
-  } catch (error) {
-    console.error(`[${SERVICE_NAME}] Failed to initialize service:`, error);
     process.exit(1);
   }
 }
 
-/**
- * グレースフルシャットダウン
- */
-async function gracefulShutdown(signal) {
-  console.log(`[${SERVICE_NAME}] ${signal} received, shutting down gracefully...`);
-
-  try {
-    await db.closeConnection();
-    console.log(`[${SERVICE_NAME}] Database connections closed`);
-    process.exit(0);
-  } catch (error) {
-    console.error(`[${SERVICE_NAME}] Error during shutdown:`, error);
-    process.exit(1);
-  }
-}
-
-// シグナルハンドリング
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-
-// 未処理エラーハンドリング
-process.on('unhandledRejection', (reason, promise) => {
-  console.error(`[${SERVICE_NAME}] Unhandled Rejection at:`, promise, 'reason:', reason);
-});
-
-process.on('uncaughtException', (error) => {
-  console.error(`[${SERVICE_NAME}] Uncaught Exception:`, error);
-  process.exit(1);
-});
-
-// サービス起動
-main();
+// Run batch processing
+runBatchProcessing();

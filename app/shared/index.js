@@ -1,16 +1,12 @@
 /**
- * Shared Module Entry Point
- *
- * 共通ライブラリのエクスポート
+ * Shared library index
+ * Exports common utilities for all services
  */
 
-const { getDbConnection, closeDbConnection, query, getPool } = require('./db/connection');
+const db = require('./db');
+const logger = require('./logger');
 
 module.exports = {
-  db: {
-    getConnection: getDbConnection,
-    closeConnection: closeDbConnection,
-    query,
-    getPool
-  }
+  db,
+  logger,
 };

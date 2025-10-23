@@ -1,353 +1,231 @@
-# Application Monorepo
+# Sample Application
 
-このディレクトリには、3つのNode.jsサービスと共通ライブラリが含まれています。
+Monorepo for Sample Application services using npm workspaces.
 
-## ディレクトリ構造
+## Project Structure
 
 ```
 app/
-├── public/                  # Public Web Service (一般ユーザー向け)
-│   ├── src/
-│   │   ├── index.js        # エントリーポイント
-│   │   └── app.js          # Expressアプリケーション
-│   ├── Dockerfile          # Dockerイメージビルド
-│   └── package.json
-├── admin/                   # Admin Dashboard (管理者向け、VPN経由のみ)
-│   ├── src/
-│   │   ├── index.js
-│   │   └── app.js
-│   ├── Dockerfile
-│   └── package.json
-├── batch/                   # Batch Processing (データ処理・集計)
-│   ├── src/
-│   │   └── index.js
-│   ├── Dockerfile
-│   └── package.json
-├── shared/                  # 共通ライブラリ
-│   ├── db/
-│   │   └── connection.js   # データベース接続プール
-│   ├── index.js
-│   └── package.json
-├── package.json            # ルートpackage.json (npm workspaces)
-└── README.md               # このファイル
+├── shared/           # Shared libraries (db, logger)
+├── public/           # Public Web Service (customer-facing API)
+├── admin/            # Admin Dashboard Service (internal management)
+├── batch/            # Batch Processing Service (scheduled tasks)
+└── package.json      # Root package.json with workspace configuration
 ```
 
-## 技術スタック
+## Services
 
-- **Runtime**: Node.js 20 (LTS)
-- **Framework**: Express.js 4.18.x
-- **Database**: PostgreSQL 15 (via pg 8.11.x)
-- **Container**: Docker (Multi-stage build)
-- **Package Management**: npm workspaces (Monorepo)
+### Public Web Service
+- **Port**: 3000
+- **Purpose**: Customer-facing REST API
+- **Endpoints**:
+  - `GET /health` - Health check
+  - `GET /api/users` - List users
+  - `POST /api/users` - Create user
+  - `GET /api/users/:id` - Get user by ID
+  - `GET /api/stats` - Get statistics
+  - `POST /api/stats` - Record statistic
 
-## ローカル開発環境セットアップ
-
-### 1. 依存関係インストール
-
-```bash
-cd app
-npm run install:all
-```
-
-### 2. 環境変数設定
-
-`.env.example` をコピーして `.env` を作成：
-
-```bash
-cp .env.example .env
-```
-
-`.env` ファイルに以下の値を設定：
-
-```env
-# Database Configuration
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=myapp_dev
-DB_USER=postgres
-DB_PASSWORD=your_password_here
-
-# Application Configuration
-NODE_ENV=development
-PORT=8080
-
-# Batch Configuration (batch serviceのみ)
-BATCH_INTERVAL=3600000  # 1 hour in milliseconds
-```
-
-### 3. PostgreSQLの起動
-
-Docker Composeを使用する場合：
-
-```bash
-docker-compose up -d postgres
-```
-
-または、ローカルPostgreSQLを使用する場合、データベースを作成：
-
-```sql
-CREATE DATABASE myapp_dev;
-```
-
-### 4. サービス起動
-
-各サービスを個別に起動：
-
-```bash
-# Public Web Service
-cd public
-npm run dev
-
-# Admin Dashboard Service
-cd admin
-npm run dev
-
-# Batch Processing Service
-cd batch
-npm run dev
-```
-
-## Dockerビルド
-
-### 個別ビルド
-
-```bash
-# Public Web Service
-npm run docker:build:public
-
-# Admin Dashboard Service
-npm run docker:build:admin
-
-# Batch Processing Service
-npm run docker:build:batch
-```
-
-### 全サービスビルド
-
-```bash
-npm run docker:build
-```
-
-### Dockerイメージ実行（ローカルテスト）
-
-```bash
-# Public Web Service
-docker run -p 8080:8080 \
-  -e DB_HOST=host.docker.internal \
-  -e DB_PORT=5432 \
-  -e DB_NAME=myapp_dev \
-  -e DB_USER=postgres \
-  -e DB_PASSWORD=your_password \
-  myapp-public-web:latest
-
-# Admin Dashboard Service
-docker run -p 8081:8080 \
-  -e DB_HOST=host.docker.internal \
-  -e DB_PORT=5432 \
-  -e DB_NAME=myapp_dev \
-  -e DB_USER=postgres \
-  -e DB_PASSWORD=your_password \
-  myapp-admin-dashboard:latest
-
-# Batch Processing Service
-docker run \
-  -e DB_HOST=host.docker.internal \
-  -e DB_PORT=5432 \
-  -e DB_NAME=myapp_dev \
-  -e DB_USER=postgres \
-  -e DB_PASSWORD=your_password \
-  -e BATCH_INTERVAL=60000 \
-  myapp-batch-processing:latest
-```
-
-## ECRへのプッシュ
-
-### 1. ECRログイン
-
-```bash
-aws ecr get-login-password --region ap-northeast-1 | \
-  docker login --username AWS --password-stdin 123456789012.dkr.ecr.ap-northeast-1.amazonaws.com
-```
-
-### 2. イメージタグ付け
-
-```bash
-# Public Web Service
-docker tag myapp-public-web:latest 123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/myapp/public-web:latest
-docker tag myapp-public-web:latest 123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/myapp/public-web:v1.0.0
-
-# Admin Dashboard Service
-docker tag myapp-admin-dashboard:latest 123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/myapp/admin-dashboard:latest
-docker tag myapp-admin-dashboard:latest 123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/myapp/admin-dashboard:v1.0.0
-
-# Batch Processing Service
-docker tag myapp-batch-processing:latest 123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/myapp/batch-processing:latest
-docker tag myapp-batch-processing:latest 123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/myapp/batch-processing:v1.0.0
-```
-
-### 3. イメージプッシュ
-
-```bash
-# Public Web Service
-docker push 123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/myapp/public-web:latest
-docker push 123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/myapp/public-web:v1.0.0
-
-# Admin Dashboard Service
-docker push 123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/myapp/admin-dashboard:latest
-docker push 123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/myapp/admin-dashboard:v1.0.0
-
-# Batch Processing Service
-docker push 123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/myapp/batch-processing:latest
-docker push 123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/myapp/batch-processing:v1.0.0
-```
-
-## API エンドポイント
-
-### Public Web Service (Port 8080)
-
-- `GET /health` - ヘルスチェック
-- `GET /` - サービス情報
-- `GET /api/users` - ユーザー一覧取得
-- `POST /api/users` - ユーザー登録
-- `GET /api/stats` - 統計情報取得
-
-### Admin Dashboard Service (Port 8080, VPN経由のみ)
-
-- `GET /health` - ヘルスチェック
-- `GET /` - サービス情報
-- `GET /api/admin/stats` - システム統計情報（管理者用）
-- `GET /api/admin/users` - 全ユーザー一覧（ページネーション）
-- `DELETE /api/admin/users/:id` - ユーザー削除
-- `GET /api/admin/system` - システム情報
+### Admin Dashboard Service
+- **Port**: 3000
+- **Purpose**: Internal management and monitoring
+- **Access**: VPN-only (not publicly accessible)
+- **Endpoints**:
+  - `GET /health` - Health check
+  - `GET /admin/users` - List all users with details
+  - `DELETE /admin/users/:id` - Delete user
+  - `GET /admin/stats` - System statistics
+  - `POST /admin/stats/clear` - Clear old statistics
+  - `GET /admin/database/info` - Database information
 
 ### Batch Processing Service
+- **Execution**: Scheduled (daily at 3:00 AM JST via EventBridge)
+- **Tasks**:
+  1. Aggregate daily statistics
+  2. Clean up old data (>90 days)
+  3. Generate summary reports
 
-- 自動実行（定期バッチ）
-- `aggregateDailyStats()` - 日次統計集計
-- `cleanupOldData()` - 古いデータクリーンアップ
-- `generateMonthlyReport()` - 月次レポート生成（月初のみ）
+## Development
 
-## データベーススキーマ（サンプル）
+### Prerequisites
+- Node.js >= 20.0.0
+- npm >= 10.0.0
+- PostgreSQL 15.x
 
+### Installation
+
+```bash
+# Install all dependencies (for all workspaces)
+npm install
+```
+
+### Running Services Locally
+
+```bash
+# Set environment variables
+cp .env.example .env
+# Edit .env with your database credentials
+
+# Run Public Web Service
+npm run dev:public
+
+# Run Admin Service
+npm run dev:admin
+
+# Run Batch Service (one-time execution)
+npm run start:batch
+```
+
+### Environment Variables
+
+Required environment variables (see `.env.example`):
+
+```env
+NODE_ENV=development
+SERVICE_NAME=sample-app-public
+LOG_LEVEL=info
+PORT=3000
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=sampleappdb
+DB_USER=postgres
+DB_PASSWORD=your-password
+```
+
+## Docker
+
+### Build Images
+
+```bash
+# Public Web Service
+docker build -t sample-app-public -f public/Dockerfile .
+
+# Admin Service
+docker build -t sample-app-admin -f admin/Dockerfile .
+
+# Batch Service
+docker build -t sample-app-batch -f batch/Dockerfile .
+```
+
+### Run Containers
+
+```bash
+# Public Web Service
+docker run -p 3000:3000 \
+  -e DB_HOST=your-db-host \
+  -e DB_PASSWORD=your-password \
+  sample-app-public
+
+# Admin Service
+docker run -p 3001:3000 \
+  -e DB_HOST=your-db-host \
+  -e DB_PASSWORD=your-password \
+  sample-app-admin
+
+# Batch Service
+docker run \
+  -e DB_HOST=your-db-host \
+  -e DB_PASSWORD=your-password \
+  sample-app-batch
+```
+
+## Database Schema
+
+### Users Table
 ```sql
--- Users テーブル
 CREATE TABLE users (
   id SERIAL PRIMARY KEY,
-  username VARCHAR(255) UNIQUE NOT NULL,
-  email VARCHAR(255) UNIQUE NOT NULL,
-  created_at TIMESTAMP DEFAULT NOW(),
-  updated_at TIMESTAMP DEFAULT NOW()
+  username VARCHAR(100) NOT NULL UNIQUE,
+  email VARCHAR(255) NOT NULL UNIQUE,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+```
 
--- Orders テーブル
-CREATE TABLE orders (
+### Stats Table
+```sql
+CREATE TABLE stats (
   id SERIAL PRIMARY KEY,
-  user_id INTEGER REFERENCES users(id),
-  total_amount DECIMAL(10, 2) NOT NULL,
-  created_at TIMESTAMP DEFAULT NOW()
-);
-
--- Order Items テーブル
-CREATE TABLE order_items (
-  id SERIAL PRIMARY KEY,
-  order_id INTEGER REFERENCES orders(id),
-  product_id INTEGER,
-  quantity INTEGER NOT NULL,
-  price DECIMAL(10, 2) NOT NULL
-);
-
--- Daily Stats テーブル (Batch処理で使用)
-CREATE TABLE daily_stats (
-  id SERIAL PRIMARY KEY,
-  date DATE NOT NULL,
-  metric_name VARCHAR(255) NOT NULL,
+  metric_name VARCHAR(100) NOT NULL,
   metric_value NUMERIC NOT NULL,
-  created_at TIMESTAMP DEFAULT NOW(),
-  UNIQUE(date, metric_name)
-);
-
--- Monthly Reports テーブル (Batch処理で使用)
-CREATE TABLE monthly_reports (
-  id SERIAL PRIMARY KEY,
-  year_month VARCHAR(7) UNIQUE NOT NULL,  -- YYYY-MM
-  total_users INTEGER,
-  total_orders INTEGER,
-  total_revenue DECIMAL(12, 2),
-  generated_at TIMESTAMP DEFAULT NOW()
-);
-
--- Audit Logs テーブル
-CREATE TABLE audit_logs (
-  id SERIAL PRIMARY KEY,
-  user_id INTEGER REFERENCES users(id),
-  action VARCHAR(255) NOT NULL,
-  details TEXT,
-  created_at TIMESTAMP DEFAULT NOW()
+  recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 ```
 
-## テスト
+## Deployment
 
-```bash
-# 全サービスのテスト実行
-npm run test
+See [infrastructure documentation](../infra/cloudformation/README.md) for CloudFormation deployment.
 
-# 個別サービスのテスト実行
-cd public && npm test
-cd admin && npm test
-cd batch && npm test
+Application deployment is automated via GitHub Actions:
+- `.github/workflows/application.yml` - Builds Docker images and deploys to ECS
+
+## Architecture
+
+- **Framework**: Express.js
+- **Database**: PostgreSQL (via pg connection pool)
+- **Logging**: Winston (JSON format for CloudWatch)
+- **Container**: Docker (multi-stage builds)
+- **Orchestration**: ECS Fargate
+- **Load Balancer**: ALB (for Public Web Service only)
+- **Monitoring**: CloudWatch Logs and Metrics
+
+## Health Checks
+
+All services expose `/health` endpoint that returns:
+- Service status
+- Database connectivity
+- Connection pool statistics
+- Uptime and memory usage
+
+Example response:
+```json
+{
+  "status": "healthy",
+  "timestamp": "2025-10-24T12:00:00.000Z",
+  "service": "public-web",
+  "database": {
+    "connected": true,
+    "pool": {
+      "totalCount": 5,
+      "idleCount": 3,
+      "waitingCount": 0
+    }
+  },
+  "uptime": 3600,
+  "memory": {
+    "rss": 52428800,
+    "heapTotal": 20971520,
+    "heapUsed": 15728640
+  }
+}
 ```
 
-## Lint
+## Monitoring
 
-```bash
-# 全サービスのLint実行
-npm run lint
+Logs are structured in JSON format for CloudWatch Logs Insights:
+
+```json
+{
+  "level": "info",
+  "message": "HTTP Request",
+  "timestamp": "2025-10-24 12:00:00.000",
+  "service": "public-web",
+  "environment": "production",
+  "method": "GET",
+  "path": "/api/users",
+  "statusCode": 200,
+  "duration": "45ms"
+}
 ```
 
-## トラブルシューティング
-
-### データベース接続エラー
-
-**エラー**: `DB_HOST environment variable is required`
-
-**解決策**: `.env` ファイルに `DB_HOST` が設定されているか確認
-
----
-
-**エラー**: `Connection timeout`
-
-**解決策**:
-1. PostgreSQLが起動しているか確認
-2. `DB_HOST` と `DB_PORT` が正しいか確認
-3. ファイアウォール設定を確認
-
-### Docker イメージビルドエラー
-
-**エラー**: `npm ERR! code ENOENT`
-
-**解決策**: ルートディレクトリ (`app/`) からビルドを実行してください
-
-```bash
-cd app
-npm run docker:build:public
+Query logs in CloudWatch Logs Insights:
+```
+fields @timestamp, message, method, path, statusCode, duration
+| filter level = "error"
+| sort @timestamp desc
+| limit 20
 ```
 
-### ECS デプロイ後にタスクが起動しない
+## License
 
-**原因**:
-1. 環境変数が正しく設定されていない
-2. Secrets Manager/Parameter Storeの値が取得できない
-3. ECRイメージが存在しない
-
-**解決策**:
-1. CloudFormation テンプレートのパラメータを確認
-2. ECS タスクログを確認 (`/ecs/myapp-dev/public-web`)
-3. IAM ロールの権限を確認
-
-## 参考リンク
-
-- [Express.js Documentation](https://expressjs.com/)
-- [node-postgres (pg) Documentation](https://node-postgres.com/)
-- [Docker Multi-stage Builds](https://docs.docker.com/build/building/multi-stage/)
-- [npm Workspaces](https://docs.npmjs.com/cli/v7/using-npm/workspaces)
+Private - Internal use only

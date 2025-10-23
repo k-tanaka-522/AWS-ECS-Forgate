@@ -1,43 +1,49 @@
-# ==============================================================================
-# Admin Dashboard Service - Dockerfile
-# ==============================================================================
-# Multi-stage build for optimized image size
-# ==============================================================================
-
 # Build stage
-FROM node:20-alpine AS base
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-COPY package*.json ./
-COPY admin/package*.json ./admin/
-COPY shared/package*.json ./shared/
+# Copy package files for all workspaces
+COPY package.json ./
+COPY shared/package.json ./shared/
+COPY admin/package.json ./admin/
 
-RUN npm ci --only=production --workspaces
+# Install dependencies
+RUN npm install
 
-COPY admin/ ./admin/
-COPY shared/ ./shared/
+# Copy source code
+COPY shared ./shared
+COPY admin ./admin
 
 # Production stage
 FROM node:20-alpine
 
 WORKDIR /app
 
-COPY --from=base /app/node_modules ./node_modules
-COPY --from=base /app/admin ./admin
-COPY --from=base /app/shared ./shared
+# Install curl for health checks
+RUN apk add --no-cache curl
+
+# Copy from builder
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/shared ./shared
+COPY --from=builder /app/admin ./admin
+
+# Set working directory to admin service
+WORKDIR /app/admin
 
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001
-
-RUN chown -R nodejs:nodejs /app
+    adduser -S nodejs -u 1001 && \
+    chown -R nodejs:nodejs /app
 
 USER nodejs
 
-EXPOSE 8080
+# Expose port
+EXPOSE 3000
 
-HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:8080/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+  CMD curl -f http://localhost:3000/health || exit 1
 
-CMD ["node", "admin/src/index.js"]
+# Start application
+CMD ["node", "src/index.js"]

@@ -1,22 +1,20 @@
 {
-  "name": "@myapp/admin-dashboard",
+  "name": "@sample-app/admin",
   "version": "1.0.0",
-  "description": "Admin Dashboard Service - Management interface (VPN access only)",
+  "description": "Admin Dashboard Service - Internal management API",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "NODE_ENV=development node src/index.js",
-    "test": "echo \"No tests configured\" && exit 0"
+    "dev": "nodemon src/index.js",
+    "test": "echo \"No tests yet\""
   },
-  "keywords": [
-    "admin",
-    "dashboard",
-    "management"
-  ],
-  "author": "Your Team",
-  "license": "MIT",
   "dependencies": {
-    "@myapp/shared": "^1.0.0",
-    "express": "^4.18.2"
+    "@sample-app/shared": "^1.0.0",
+    "express": "^4.18.2",
+    "helmet": "^7.1.0",
+    "compression": "^1.7.4"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.3"
   }
 }

@@ -1,19 +1,13 @@
 {
-  "name": "@myapp/shared",
+  "name": "@sample-app/shared",
   "version": "1.0.0",
-  "description": "Shared libraries and utilities",
+  "description": "Shared libraries for all services",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"No tests configured\" && exit 0"
+    "test": "echo \"No tests yet\""
   },
-  "keywords": [
-    "shared",
-    "database",
-    "utilities"
-  ],
-  "author": "Your Team",
-  "license": "MIT",
   "dependencies": {
-    "pg": "^8.11.3"
+    "pg": "^8.11.3",
+    "winston": "^3.11.0"
   }
 }

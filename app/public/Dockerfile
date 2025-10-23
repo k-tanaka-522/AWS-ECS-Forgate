@@ -1,56 +1,49 @@
-# ==============================================================================
-# Public Web Service - Dockerfile
-# ==============================================================================
-# Multi-stage build for optimized image size
-# ==============================================================================
-
 # Build stage
-FROM node:20-alpine AS base
+FROM node:20-alpine AS builder
 
-# Set working directory
 WORKDIR /app
 
-# Copy root package.json and package-lock.json
-COPY package*.json ./
+# Copy package files for all workspaces
+COPY package.json ./
+COPY shared/package.json ./shared/
+COPY public/package.json ./public/
 
-# Copy workspace package.json files
-COPY public/package*.json ./public/
-COPY shared/package*.json ./shared/
+# Install dependencies
+RUN npm install
 
-# Install all dependencies (including workspaces)
-RUN npm ci --only=production --workspaces
-
-# Copy application code
-COPY public/ ./public/
-COPY shared/ ./shared/
+# Copy source code
+COPY shared ./shared
+COPY public ./public
 
 # Production stage
 FROM node:20-alpine
 
-# Set working directory
 WORKDIR /app
 
-# Copy dependencies from build stage
-COPY --from=base /app/node_modules ./node_modules
-COPY --from=base /app/public ./public
-COPY --from=base /app/shared ./shared
+# Install curl for health checks
+RUN apk add --no-cache curl
+
+# Copy from builder
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/shared ./shared
+COPY --from=builder /app/public ./public
+
+# Set working directory to public service
+WORKDIR /app/public
 
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001
+    adduser -S nodejs -u 1001 && \
+    chown -R nodejs:nodejs /app
 
-# Change ownership
-RUN chown -R nodejs:nodejs /app
-
-# Switch to non-root user
 USER nodejs
 
 # Expose port
-EXPOSE 8080
+EXPOSE 3000
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:8080/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+  CMD curl -f http://localhost:3000/health || exit 1
 
 # Start application
-CMD ["node", "public/src/index.js"]
+CMD ["node", "src/index.js"]

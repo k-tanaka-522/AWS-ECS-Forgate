@@ -1,21 +1,13 @@
 {
-  "name": "@myapp/batch-processing",
+  "name": "@sample-app/batch",
   "version": "1.0.0",
-  "description": "Batch Processing Service - Data processing and aggregation",
+  "description": "Batch Processing Service - Scheduled tasks",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "NODE_ENV=development node src/index.js",
-    "test": "echo \"No tests configured\" && exit 0"
+    "test": "echo \"No tests yet\""
   },
-  "keywords": [
-    "batch",
-    "processing",
-    "data"
-  ],
-  "author": "Your Team",
-  "license": "MIT",
   "dependencies": {
-    "@myapp/shared": "^1.0.0"
+    "@sample-app/shared": "^1.0.0"
   }
 }

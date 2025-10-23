@@ -1,22 +1,21 @@
 {
-  "name": "@myapp/public-web",
+  "name": "@sample-app/public",
   "version": "1.0.0",
-  "description": "Public Web Service - User-facing web application",
+  "description": "Public Web Service - Customer-facing API",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "NODE_ENV=development node src/index.js",
-    "test": "echo \"No tests configured\" && exit 0"
+    "dev": "nodemon src/index.js",
+    "test": "echo \"No tests yet\""
   },
-  "keywords": [
-    "web",
-    "public",
-    "ecs"
-  ],
-  "author": "Your Team",
-  "license": "MIT",
   "dependencies": {
-    "@myapp/shared": "^1.0.0",
-    "express": "^4.18.2"
+    "@sample-app/shared": "^1.0.0",
+    "express": "^4.18.2",
+    "helmet": "^7.1.0",
+    "cors": "^2.8.5",
+    "compression": "^1.7.4"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.3"
   }
 }

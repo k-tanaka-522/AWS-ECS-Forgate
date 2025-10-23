@@ -1,38 +1,39 @@
-# ==============================================================================
-# Batch Processing Service - Dockerfile
-# ==============================================================================
-# Multi-stage build for optimized image size
-# ==============================================================================
-
 # Build stage
-FROM node:20-alpine AS base
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-COPY package*.json ./
-COPY batch/package*.json ./batch/
-COPY shared/package*.json ./shared/
+# Copy package files for all workspaces
+COPY package.json ./
+COPY shared/package.json ./shared/
+COPY batch/package.json ./batch/
 
-RUN npm ci --only=production --workspaces
+# Install dependencies
+RUN npm install
 
-COPY batch/ ./batch/
-COPY shared/ ./shared/
+# Copy source code
+COPY shared ./shared
+COPY batch ./batch
 
 # Production stage
 FROM node:20-alpine
 
 WORKDIR /app
 
-COPY --from=base /app/node_modules ./node_modules
-COPY --from=base /app/batch ./batch
-COPY --from=base /app/shared ./shared
+# Copy from builder
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/shared ./shared
+COPY --from=builder /app/batch ./batch
+
+# Set working directory to batch service
+WORKDIR /app/batch
 
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001
-
-RUN chown -R nodejs:nodejs /app
+    adduser -S nodejs -u 1001 && \
+    chown -R nodejs:nodejs /app
 
 USER nodejs
 
-CMD ["node", "batch/src/index.js"]
+# Start batch processing
+CMD ["node", "src/index.js"]

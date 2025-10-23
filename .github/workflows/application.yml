@@ -1,0 +1,155 @@
+name: Deploy Application
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'app/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - prod
+      service:
+        description: 'Service to deploy'
+        required: true
+        type: choice
+        options:
+          - public
+          - admin
+          - batch
+          - all
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build-and-deploy:
+    name: Build and Deploy Application
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'dev' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ap-northeast-1
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set environment variables
+        run: |
+          echo "ECR_REGISTRY=${{ steps.login-ecr.outputs.registry }}" >> $GITHUB_ENV
+          echo "ENV=${{ github.event.inputs.environment || 'dev' }}" >> $GITHUB_ENV
+          echo "IMAGE_TAG=${{ github.sha }}" >> $GITHUB_ENV
+
+      - name: Build and Push Public Web Service
+        if: github.event.inputs.service == 'public' || github.event.inputs.service == 'all' || github.event.inputs.service == ''
+        run: |
+          echo "Building Public Web Service..."
+
+          docker build \
+            -t $ECR_REGISTRY/sample-app/public:$IMAGE_TAG \
+            -t $ECR_REGISTRY/sample-app/public:latest \
+            -f app/public/Dockerfile \
+            app/
+
+          docker push $ECR_REGISTRY/sample-app/public:$IMAGE_TAG
+          docker push $ECR_REGISTRY/sample-app/public:latest
+
+          echo "✅ Public Web Service image pushed to ECR"
+
+      - name: Build and Push Admin Service
+        if: github.event.inputs.service == 'admin' || github.event.inputs.service == 'all' || github.event.inputs.service == ''
+        run: |
+          echo "Building Admin Service..."
+
+          docker build \
+            -t $ECR_REGISTRY/sample-app/admin:$IMAGE_TAG \
+            -t $ECR_REGISTRY/sample-app/admin:latest \
+            -f app/admin/Dockerfile \
+            app/
+
+          docker push $ECR_REGISTRY/sample-app/admin:$IMAGE_TAG
+          docker push $ECR_REGISTRY/sample-app/admin:latest
+
+          echo "✅ Admin Service image pushed to ECR"
+
+      - name: Build and Push Batch Service
+        if: github.event.inputs.service == 'batch' || github.event.inputs.service == 'all' || github.event.inputs.service == ''
+        run: |
+          echo "Building Batch Service..."
+
+          docker build \
+            -t $ECR_REGISTRY/sample-app/batch:$IMAGE_TAG \
+            -t $ECR_REGISTRY/sample-app/batch:latest \
+            -f app/batch/Dockerfile \
+            app/
+
+          docker push $ECR_REGISTRY/sample-app/batch:$IMAGE_TAG
+          docker push $ECR_REGISTRY/sample-app/batch:latest
+
+          echo "✅ Batch Service image pushed to ECR"
+
+      - name: Update ECS Service - Public Web
+        if: github.event.inputs.service == 'public' || github.event.inputs.service == 'all' || github.event.inputs.service == ''
+        run: |
+          echo "Updating Public Web ECS Service..."
+
+          aws ecs update-service \
+            --cluster sample-app-$ENV-cluster \
+            --service sample-app-$ENV-public-web \
+            --force-new-deployment
+
+          echo "✅ Public Web Service deployment initiated"
+
+      - name: Update ECS Service - Admin
+        if: github.event.inputs.service == 'admin' || github.event.inputs.service == 'all' || github.event.inputs.service == ''
+        run: |
+          echo "Updating Admin ECS Service..."
+
+          aws ecs update-service \
+            --cluster sample-app-$ENV-cluster \
+            --service sample-app-$ENV-admin \
+            --force-new-deployment
+
+          echo "✅ Admin Service deployment initiated"
+
+      - name: Wait for Service Stability
+        if: github.event.inputs.service == 'public' || github.event.inputs.service == 'admin' || github.event.inputs.service == 'all' || github.event.inputs.service == ''
+        run: |
+          echo "Waiting for ECS services to stabilize..."
+
+          if [ "${{ github.event.inputs.service }}" == "public" ] || [ "${{ github.event.inputs.service }}" == "all" ] || [ -z "${{ github.event.inputs.service }}" ]; then
+            aws ecs wait services-stable \
+              --cluster sample-app-$ENV-cluster \
+              --services sample-app-$ENV-public-web
+          fi
+
+          if [ "${{ github.event.inputs.service }}" == "admin" ] || [ "${{ github.event.inputs.service }}" == "all" ] || [ -z "${{ github.event.inputs.service }}" ]; then
+            aws ecs wait services-stable \
+              --cluster sample-app-$ENV-cluster \
+              --services sample-app-$ENV-admin
+          fi
+
+          echo "✅ All services are stable"
+
+      - name: Summary
+        run: |
+          echo "✅ Application deployment completed!"
+          echo "Environment: ${{ github.event.inputs.environment || 'dev' }}"
+          echo "Service: ${{ github.event.inputs.service || 'all' }}"
+          echo "Image Tag: $IMAGE_TAG"
