@@ -1,328 +1,85 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Service Account - Compute Resources (ECS Fargate, ALB, ECR)'
+Description: 'Service Account - Compute Stack (ECS Fargate, ALB)'
 
-# ==============================================================================
+# ===========================================================================
 # Parameters
-# ==============================================================================
+# ===========================================================================
 Parameters:
+  ProjectName:
+    Type: String
+    Default: sample-app
+    Description: Project name for resource naming
+
   Environment:
     Type: String
-    Description: Environment name
+    Default: dev
     AllowedValues:
       - dev
       - prod
-    Default: dev
+    Description: Environment name
 
-  ProjectName:
+  VpcId:
     Type: String
-    Description: Project name
-    Default: sample-app
+    Description: Service VPC ID
 
-# ==============================================================================
-# Conditions
-# ==============================================================================
-Conditions:
-  IsProduction: !Equals [!Ref Environment, prod]
+  PublicSubnet1Id:
+    Type: String
+    Description: Public Subnet 1 ID
 
-# ==============================================================================
+  PublicSubnet2Id:
+    Type: String
+    Description: Public Subnet 2 ID
+
+  PrivateSubnet1Id:
+    Type: String
+    Description: Private Subnet 1 ID
+
+  PrivateSubnet2Id:
+    Type: String
+    Description: Private Subnet 2 ID
+
+  DBEndpointAddress:
+    Type: String
+    Description: RDS Endpoint Address
+
+  DBEndpointPort:
+    Type: String
+    Description: RDS Endpoint Port
+
+  DBName:
+    Type: String
+    Description: Database Name
+
+  DBConnectionStringSecretArn:
+    Type: String
+    Description: DB Connection String Secret ARN
+
+  ECRRepositoryPublic:
+    Type: String
+    Default: sample-app/public
+    Description: ECR Repository name for Public Web service
+
+  ECRRepositoryAdmin:
+    Type: String
+    Default: sample-app/admin
+    Description: ECR Repository name for Admin service
+
+  ECRRepositoryBatch:
+    Type: String
+    Default: sample-app/batch
+    Description: ECR Repository name for Batch service
+
+# ===========================================================================
 # Resources
-# ==============================================================================
+# ===========================================================================
 Resources:
-  # ----------------------------------------------------------------------------
-  # ECR Repositories
-  # ----------------------------------------------------------------------------
-  PublicWebECRRepository:
-    Type: AWS::ECR::Repository
-    Properties:
-      RepositoryName: !Sub ${ProjectName}/${Environment}/public-web
-      ImageScanningConfiguration:
-        ScanOnPush: true
-      EncryptionConfiguration:
-        EncryptionType: AES256
-      LifecyclePolicy:
-        LifecyclePolicyText: |
-          {
-            "rules": [
-              {
-                "rulePriority": 1,
-                "description": "Keep last 10 images",
-                "selection": {
-                  "tagStatus": "any",
-                  "countType": "imageCountMoreThan",
-                  "countNumber": 10
-                },
-                "action": {
-                  "type": "expire"
-                }
-              }
-            ]
-          }
-      Tags:
-        - Key: Name
-          Value: !Sub ${ProjectName}-${Environment}-public-web-ecr
-        - Key: Environment
-          Value: !Ref Environment
-        - Key: ManagedBy
-          Value: CloudFormation
-
-  AdminDashboardECRRepository:
-    Type: AWS::ECR::Repository
-    Properties:
-      RepositoryName: !Sub ${ProjectName}/${Environment}/admin-dashboard
-      ImageScanningConfiguration:
-        ScanOnPush: true
-      EncryptionConfiguration:
-        EncryptionType: AES256
-      LifecyclePolicy:
-        LifecyclePolicyText: |
-          {
-            "rules": [
-              {
-                "rulePriority": 1,
-                "description": "Keep last 10 images",
-                "selection": {
-                  "tagStatus": "any",
-                  "countType": "imageCountMoreThan",
-                  "countNumber": 10
-                },
-                "action": {
-                  "type": "expire"
-                }
-              }
-            ]
-          }
-      Tags:
-        - Key: Name
-          Value: !Sub ${ProjectName}-${Environment}-admin-dashboard-ecr
-        - Key: Environment
-          Value: !Ref Environment
-        - Key: ManagedBy
-          Value: CloudFormation
-
-  BatchProcessingECRRepository:
-    Type: AWS::ECR::Repository
-    Properties:
-      RepositoryName: !Sub ${ProjectName}/${Environment}/batch-processing
-      ImageScanningConfiguration:
-        ScanOnPush: true
-      EncryptionConfiguration:
-        EncryptionType: AES256
-      LifecyclePolicy:
-        LifecyclePolicyText: |
-          {
-            "rules": [
-              {
-                "rulePriority": 1,
-                "description": "Keep last 10 images",
-                "selection": {
-                  "tagStatus": "any",
-                  "countType": "imageCountMoreThan",
-                  "countNumber": 10
-                },
-                "action": {
-                  "type": "expire"
-                }
-              }
-            ]
-          }
-      Tags:
-        - Key: Name
-          Value: !Sub ${ProjectName}-${Environment}-batch-processing-ecr
-        - Key: Environment
-          Value: !Ref Environment
-        - Key: ManagedBy
-          Value: CloudFormation
-
-  # ----------------------------------------------------------------------------
-  # Security Groups
-  # ----------------------------------------------------------------------------
-  ECSSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Security group for ECS tasks
-      VpcId:
-        Fn::ImportValue: !Sub ${ProjectName}-${Environment}-service-vpc-id
-      Tags:
-        - Key: Name
-          Value: !Sub ${ProjectName}-${Environment}-ecs-sg
-        - Key: Environment
-          Value: !Ref Environment
-        - Key: ManagedBy
-          Value: CloudFormation
-
-  ECSSecurityGroupIngressFromALB:
-    Type: AWS::EC2::SecurityGroupIngress
-    Properties:
-      GroupId: !Ref ECSSecurityGroup
-      IpProtocol: tcp
-      FromPort: 3000
-      ToPort: 3001
-      SourceSecurityGroupId: !Ref ALBSecurityGroup
-      Description: Allow from ALB
-
-  ECSSecurityGroupEgress:
-    Type: AWS::EC2::SecurityGroupEgress
-    Properties:
-      GroupId: !Ref ECSSecurityGroup
-      IpProtocol: -1
-      CidrIp: 0.0.0.0/0
-      Description: Allow all outbound
-
-  ALBSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Security group for Application Load Balancer
-      VpcId:
-        Fn::ImportValue: !Sub ${ProjectName}-${Environment}-service-vpc-id
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-          CidrIp: 0.0.0.0/0
-          Description: Allow HTTP from internet
-        - IpProtocol: tcp
-          FromPort: 443
-          ToPort: 443
-          CidrIp: 0.0.0.0/0
-          Description: Allow HTTPS from internet
-      SecurityGroupEgress:
-        - IpProtocol: -1
-          CidrIp: 0.0.0.0/0
-          Description: Allow all outbound
-      Tags:
-        - Key: Name
-          Value: !Sub ${ProjectName}-${Environment}-alb-sg
-        - Key: Environment
-          Value: !Ref Environment
-        - Key: ManagedBy
-          Value: CloudFormation
-
-  # Export ECS Security Group for database stack
-  ECSSecurityGroupExport:
-    Type: AWS::SSM::Parameter
-    Properties:
-      Name: !Sub /${ProjectName}/${Environment}/ecs-security-group-id
-      Type: String
-      Value: !Ref ECSSecurityGroup
-      Description: ECS Security Group ID for cross-stack reference
-
-  # ----------------------------------------------------------------------------
-  # Application Load Balancer
-  # ----------------------------------------------------------------------------
-  ApplicationLoadBalancer:
-    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
-    Properties:
-      Name: !Sub ${ProjectName}-${Environment}-alb
-      Type: application
-      Scheme: internet-facing
-      IpAddressType: ipv4
-      SecurityGroups:
-        - !Ref ALBSecurityGroup
-      Subnets:
-        - Fn::ImportValue: !Sub ${ProjectName}-${Environment}-public-subnet-1-id
-        - Fn::ImportValue: !Sub ${ProjectName}-${Environment}-public-subnet-2-id
-      Tags:
-        - Key: Name
-          Value: !Sub ${ProjectName}-${Environment}-alb
-        - Key: Environment
-          Value: !Ref Environment
-        - Key: ManagedBy
-          Value: CloudFormation
-
-  # Target Groups
-  PublicWebTargetGroup:
-    Type: AWS::ElasticLoadBalancingV2::TargetGroup
-    Properties:
-      Name: !Sub ${ProjectName}-${Environment}-public-web-tg
-      VpcId:
-        Fn::ImportValue: !Sub ${ProjectName}-${Environment}-service-vpc-id
-      Protocol: HTTP
-      Port: 3000
-      TargetType: ip
-      HealthCheckEnabled: true
-      HealthCheckPath: /health
-      HealthCheckProtocol: HTTP
-      HealthCheckIntervalSeconds: 30
-      HealthCheckTimeoutSeconds: 5
-      HealthyThresholdCount: 2
-      UnhealthyThresholdCount: 3
-      Matcher:
-        HttpCode: 200
-      Tags:
-        - Key: Name
-          Value: !Sub ${ProjectName}-${Environment}-public-web-tg
-        - Key: Environment
-          Value: !Ref Environment
-        - Key: ManagedBy
-          Value: CloudFormation
-
-  AdminDashboardTargetGroup:
-    Type: AWS::ElasticLoadBalancingV2::TargetGroup
-    Properties:
-      Name: !Sub ${ProjectName}-${Environment}-admin-tg
-      VpcId:
-        Fn::ImportValue: !Sub ${ProjectName}-${Environment}-service-vpc-id
-      Protocol: HTTP
-      Port: 3001
-      TargetType: ip
-      HealthCheckEnabled: true
-      HealthCheckPath: /health
-      HealthCheckProtocol: HTTP
-      HealthCheckIntervalSeconds: 30
-      HealthCheckTimeoutSeconds: 5
-      HealthyThresholdCount: 2
-      UnhealthyThresholdCount: 3
-      Matcher:
-        HttpCode: 200
-      Tags:
-        - Key: Name
-          Value: !Sub ${ProjectName}-${Environment}-admin-tg
-        - Key: Environment
-          Value: !Ref Environment
-        - Key: ManagedBy
-          Value: CloudFormation
-
-  # Listeners
-  ALBListenerHTTP:
-    Type: AWS::ElasticLoadBalancingV2::Listener
-    Properties:
-      LoadBalancerArn: !Ref ApplicationLoadBalancer
-      Protocol: HTTP
-      Port: 80
-      DefaultActions:
-        - Type: forward
-          TargetGroupArn: !Ref PublicWebTargetGroup
-
-  # Listener Rules for Admin Dashboard
-  ALBListenerRuleAdmin:
-    Type: AWS::ElasticLoadBalancingV2::ListenerRule
-    Properties:
-      ListenerArn: !Ref ALBListenerHTTP
-      Priority: 10
-      Conditions:
-        - Field: path-pattern
-          Values:
-            - /admin/*
-      Actions:
-        - Type: forward
-          TargetGroupArn: !Ref AdminDashboardTargetGroup
-
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
   # ECS Cluster
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
   ECSCluster:
     Type: AWS::ECS::Cluster
     Properties:
       ClusterName: !Sub ${ProjectName}-${Environment}-cluster
-      CapacityProviders:
-        - FARGATE
-        - FARGATE_SPOT
-      DefaultCapacityProviderStrategy:
-        - CapacityProvider: FARGATE
-          Weight: 1
-      Configuration:
-        ExecuteCommandConfiguration:
-          Logging: DEFAULT
       ClusterSettings:
         - Name: containerInsights
           Value: enabled
@@ -334,30 +91,178 @@ Resources:
         - Key: ManagedBy
           Value: CloudFormation
 
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
+  # Application Load Balancer (for Public Web)
+  # -------------------------------------------------------------------------
+  # ALB Security Group
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${ProjectName}-${Environment}-alb-sg
+      GroupDescription: Security Group for ALB
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: Allow HTTP from Internet
+        # For future HTTPS support
+        # - IpProtocol: tcp
+        #   FromPort: 443
+        #   ToPort: 443
+        #   CidrIp: 0.0.0.0/0
+        #   Description: Allow HTTPS from Internet
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-alb-sg
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # Application Load Balancer
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub ${ProjectName}-${Environment}-alb
+      Type: application
+      Scheme: internet-facing
+      IpAddressType: ipv4
+      Subnets:
+        - !Ref PublicSubnet1Id
+        - !Ref PublicSubnet2Id
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-alb
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # Target Group for Public Web Service
+  PublicWebTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${ProjectName}-${Environment}-public-tg
+      VpcId: !Ref VpcId
+      Port: 3000
+      Protocol: HTTP
+      TargetType: ip
+      HealthCheckEnabled: true
+      HealthCheckPath: /health
+      HealthCheckProtocol: HTTP
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Matcher:
+        HttpCode: '200'
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-public-tg
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ALB Listener (HTTP)
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref PublicWebTargetGroup
+
+  # -------------------------------------------------------------------------
+  # Security Group for ECS Tasks
+  # -------------------------------------------------------------------------
+  ECSTaskSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${ProjectName}-${Environment}-ecs-task-sg
+      GroupDescription: Security Group for ECS Tasks
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        # Allow traffic from ALB
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+          Description: Allow traffic from ALB
+        # Allow traffic from Platform VPC (VPN access for admin)
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          CidrIp: 10.0.0.0/16
+          Description: Allow traffic from Platform VPC (VPN)
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-ecs-task-sg
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # -------------------------------------------------------------------------
   # CloudWatch Log Groups
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
   PublicWebLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: /ecs/sample-app/public-web
-      RetentionInDays: !If [IsProduction, 90, 30]
+      LogGroupName: !Sub /ecs/${ProjectName}/${Environment}/public-web
+      RetentionInDays: 7
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-public-web-logs
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
-  AdminDashboardLogGroup:
+  AdminLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: /ecs/sample-app/admin-dashboard
-      RetentionInDays: !If [IsProduction, 90, 30]
+      LogGroupName: !Sub /ecs/${ProjectName}/${Environment}/admin
+      RetentionInDays: 7
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-admin-logs
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
-  BatchProcessingLogGroup:
+  BatchLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: /ecs/sample-app/batch-processing
-      RetentionInDays: !If [IsProduction, 90, 30]
+      LogGroupName: !Sub /ecs/${ProjectName}/${Environment}/batch
+      RetentionInDays: 7
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-batch-logs
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
   # IAM Roles
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
+  # ECS Task Execution Role (for ECS to pull images, write logs, etc.)
   ECSTaskExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -380,7 +285,7 @@ Resources:
                 Action:
                   - secretsmanager:GetSecretValue
                 Resource:
-                  - Fn::ImportValue: !Sub ${ProjectName}-${Environment}-db-secret-arn
+                  - !Ref DBConnectionStringSecretArn
       Tags:
         - Key: Name
           Value: !Sub ${ProjectName}-${Environment}-ecs-task-execution-role
@@ -389,10 +294,11 @@ Resources:
         - Key: ManagedBy
           Value: CloudFormation
 
-  ECSTaskRole:
+  # ECS Task Role (for application runtime permissions)
+  ECSTaskRolePublic:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub ${ProjectName}-${Environment}-ecs-task-role
+      RoleName: !Sub ${ProjectName}-${Environment}-ecs-task-role-public
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -409,27 +315,77 @@ Resources:
                 Action:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
-                Resource: '*'
-        - PolicyName: SecretsManagerReadAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - secretsmanager:GetSecretValue
-                Resource:
-                  - Fn::ImportValue: !Sub ${ProjectName}-${Environment}-db-secret-arn
+                Resource: !GetAtt PublicWebLogGroup.Arn
       Tags:
         - Key: Name
-          Value: !Sub ${ProjectName}-${Environment}-ecs-task-role
+          Value: !Sub ${ProjectName}-${Environment}-ecs-task-role-public
         - Key: Environment
           Value: !Ref Environment
         - Key: ManagedBy
           Value: CloudFormation
 
-  # ----------------------------------------------------------------------------
+  ECSTaskRoleAdmin:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ProjectName}-${Environment}-ecs-task-role-admin
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CloudWatchLogsAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt AdminLogGroup.Arn
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-ecs-task-role-admin
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  ECSTaskRoleBatch:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ProjectName}-${Environment}-ecs-task-role-batch
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CloudWatchLogsAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt BatchLogGroup.Arn
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-ecs-task-role-batch
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # -------------------------------------------------------------------------
   # ECS Task Definitions
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
+  # Public Web Service Task Definition
   PublicWebTaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
@@ -437,45 +393,45 @@ Resources:
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
-      Cpu: '256'
-      Memory: '512'
+      Cpu: '512'
+      Memory: '1024'
       ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
-      TaskRoleArn: !GetAtt ECSTaskRole.Arn
+      TaskRoleArn: !GetAtt ECSTaskRolePublic.Arn
       ContainerDefinitions:
         - Name: public-web
-          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${PublicWebECRRepository}:latest
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ECRRepositoryPublic}:latest
           Essential: true
           PortMappings:
             - ContainerPort: 3000
               Protocol: tcp
           Environment:
             - Name: NODE_ENV
-              Value: !Ref Environment
+              Value: production
             - Name: PORT
               Value: '3000'
-            - Name: LOG_LEVEL
-              Value: info
-            - Name: AWS_REGION
-              Value: !Ref AWS::Region
             - Name: DB_HOST
-              Value:
-                Fn::ImportValue: !Sub ${ProjectName}-${Environment}-db-endpoint
+              Value: !Ref DBEndpointAddress
             - Name: DB_PORT
-              Value:
-                Fn::ImportValue: !Sub ${ProjectName}-${Environment}-db-port
+              Value: !Ref DBEndpointPort
             - Name: DB_NAME
-              Value:
-                Fn::ImportValue: !Sub ${ProjectName}-${Environment}-db-name
+              Value: !Ref DBName
           Secrets:
-            - Name: DB_SECRET_ARN
-              ValueFrom:
-                Fn::ImportValue: !Sub ${ProjectName}-${Environment}-db-secret-arn
+            - Name: DB_PASSWORD
+              ValueFrom: !Sub ${DBConnectionStringSecretArn}:password::
           LogConfiguration:
             LogDriver: awslogs
             Options:
               awslogs-group: !Ref PublicWebLogGroup
               awslogs-region: !Ref AWS::Region
               awslogs-stream-prefix: ecs
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - curl -f http://localhost:3000/health || exit 1
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 60
       Tags:
         - Key: Name
           Value: !Sub ${ProjectName}-${Environment}-public-web-task
@@ -484,134 +440,135 @@ Resources:
         - Key: ManagedBy
           Value: CloudFormation
 
-  AdminDashboardTaskDefinition:
+  # Admin Service Task Definition
+  AdminTaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
-      Family: !Sub ${ProjectName}-${Environment}-admin-dashboard
+      Family: !Sub ${ProjectName}-${Environment}-admin
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
-      Cpu: '256'
-      Memory: '512'
+      Cpu: '512'
+      Memory: '1024'
       ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
-      TaskRoleArn: !GetAtt ECSTaskRole.Arn
+      TaskRoleArn: !GetAtt ECSTaskRoleAdmin.Arn
       ContainerDefinitions:
-        - Name: admin-dashboard
-          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${AdminDashboardECRRepository}:latest
+        - Name: admin
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ECRRepositoryAdmin}:latest
           Essential: true
           PortMappings:
-            - ContainerPort: 3001
+            - ContainerPort: 3000
               Protocol: tcp
           Environment:
             - Name: NODE_ENV
-              Value: !Ref Environment
+              Value: production
             - Name: PORT
-              Value: '3001'
-            - Name: LOG_LEVEL
-              Value: info
-            - Name: AWS_REGION
-              Value: !Ref AWS::Region
+              Value: '3000'
             - Name: DB_HOST
-              Value:
-                Fn::ImportValue: !Sub ${ProjectName}-${Environment}-db-endpoint
+              Value: !Ref DBEndpointAddress
             - Name: DB_PORT
-              Value:
-                Fn::ImportValue: !Sub ${ProjectName}-${Environment}-db-port
+              Value: !Ref DBEndpointPort
             - Name: DB_NAME
-              Value:
-                Fn::ImportValue: !Sub ${ProjectName}-${Environment}-db-name
+              Value: !Ref DBName
           Secrets:
-            - Name: DB_SECRET_ARN
-              ValueFrom:
-                Fn::ImportValue: !Sub ${ProjectName}-${Environment}-db-secret-arn
+            - Name: DB_PASSWORD
+              ValueFrom: !Sub ${DBConnectionStringSecretArn}:password::
           LogConfiguration:
             LogDriver: awslogs
             Options:
-              awslogs-group: !Ref AdminDashboardLogGroup
+              awslogs-group: !Ref AdminLogGroup
               awslogs-region: !Ref AWS::Region
               awslogs-stream-prefix: ecs
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - curl -f http://localhost:3000/health || exit 1
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 60
       Tags:
         - Key: Name
-          Value: !Sub ${ProjectName}-${Environment}-admin-dashboard-task
+          Value: !Sub ${ProjectName}-${Environment}-admin-task
         - Key: Environment
           Value: !Ref Environment
         - Key: ManagedBy
           Value: CloudFormation
 
-  BatchProcessingTaskDefinition:
+  # Batch Service Task Definition
+  BatchTaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
-      Family: !Sub ${ProjectName}-${Environment}-batch-processing
+      Family: !Sub ${ProjectName}-${Environment}-batch
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
-      Cpu: '256'
-      Memory: '512'
+      Cpu: '1024'
+      Memory: '2048'
       ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
-      TaskRoleArn: !GetAtt ECSTaskRole.Arn
+      TaskRoleArn: !GetAtt ECSTaskRoleBatch.Arn
       ContainerDefinitions:
-        - Name: batch-processing
-          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${BatchProcessingECRRepository}:latest
+        - Name: batch
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ECRRepositoryBatch}:latest
           Essential: true
           Environment:
             - Name: NODE_ENV
-              Value: !Ref Environment
-            - Name: LOG_LEVEL
-              Value: info
-            - Name: AWS_REGION
-              Value: !Ref AWS::Region
+              Value: production
             - Name: DB_HOST
-              Value:
-                Fn::ImportValue: !Sub ${ProjectName}-${Environment}-db-endpoint
+              Value: !Ref DBEndpointAddress
             - Name: DB_PORT
-              Value:
-                Fn::ImportValue: !Sub ${ProjectName}-${Environment}-db-port
+              Value: !Ref DBEndpointPort
             - Name: DB_NAME
-              Value:
-                Fn::ImportValue: !Sub ${ProjectName}-${Environment}-db-name
+              Value: !Ref DBName
           Secrets:
-            - Name: DB_SECRET_ARN
-              ValueFrom:
-                Fn::ImportValue: !Sub ${ProjectName}-${Environment}-db-secret-arn
+            - Name: DB_PASSWORD
+              ValueFrom: !Sub ${DBConnectionStringSecretArn}:password::
           LogConfiguration:
             LogDriver: awslogs
             Options:
-              awslogs-group: !Ref BatchProcessingLogGroup
+              awslogs-group: !Ref BatchLogGroup
               awslogs-region: !Ref AWS::Region
               awslogs-stream-prefix: ecs
       Tags:
         - Key: Name
-          Value: !Sub ${ProjectName}-${Environment}-batch-processing-task
+          Value: !Sub ${ProjectName}-${Environment}-batch-task
         - Key: Environment
           Value: !Ref Environment
         - Key: ManagedBy
           Value: CloudFormation
 
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
   # ECS Services
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
+  # Public Web Service
   PublicWebService:
     Type: AWS::ECS::Service
-    DependsOn: ALBListenerHTTP
+    DependsOn: ALBListener
     Properties:
       ServiceName: !Sub ${ProjectName}-${Environment}-public-web
       Cluster: !Ref ECSCluster
       TaskDefinition: !Ref PublicWebTaskDefinition
-      DesiredCount: !If [IsProduction, 4, 2]
+      DesiredCount: 2
       LaunchType: FARGATE
       NetworkConfiguration:
         AwsvpcConfiguration:
           AssignPublicIp: DISABLED
-          SecurityGroups:
-            - !Ref ECSSecurityGroup
           Subnets:
-            - Fn::ImportValue: !Sub ${ProjectName}-${Environment}-private-subnet-1-id
-            - Fn::ImportValue: !Sub ${ProjectName}-${Environment}-private-subnet-2-id
+            - !Ref PrivateSubnet1Id
+            - !Ref PrivateSubnet2Id
+          SecurityGroups:
+            - !Ref ECSTaskSecurityGroup
       LoadBalancers:
         - ContainerName: public-web
           ContainerPort: 3000
           TargetGroupArn: !Ref PublicWebTargetGroup
       HealthCheckGracePeriodSeconds: 60
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 50
+        MaximumPercent: 200
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
       Tags:
         - Key: Name
           Value: !Sub ${ProjectName}-${Environment}-public-web-service
@@ -620,42 +577,68 @@ Resources:
         - Key: ManagedBy
           Value: CloudFormation
 
-  AdminDashboardService:
+  # Admin Service (no ALB, VPN access only)
+  AdminService:
     Type: AWS::ECS::Service
-    DependsOn: ALBListenerRuleAdmin
     Properties:
-      ServiceName: !Sub ${ProjectName}-${Environment}-admin-dashboard
+      ServiceName: !Sub ${ProjectName}-${Environment}-admin
       Cluster: !Ref ECSCluster
-      TaskDefinition: !Ref AdminDashboardTaskDefinition
-      DesiredCount: !If [IsProduction, 2, 1]
+      TaskDefinition: !Ref AdminTaskDefinition
+      DesiredCount: 1
       LaunchType: FARGATE
       NetworkConfiguration:
         AwsvpcConfiguration:
           AssignPublicIp: DISABLED
-          SecurityGroups:
-            - !Ref ECSSecurityGroup
           Subnets:
-            - Fn::ImportValue: !Sub ${ProjectName}-${Environment}-private-subnet-1-id
-            - Fn::ImportValue: !Sub ${ProjectName}-${Environment}-private-subnet-2-id
-      LoadBalancers:
-        - ContainerName: admin-dashboard
-          ContainerPort: 3001
-          TargetGroupArn: !Ref AdminDashboardTargetGroup
-      HealthCheckGracePeriodSeconds: 60
+            - !Ref PrivateSubnet1Id
+            - !Ref PrivateSubnet2Id
+          SecurityGroups:
+            - !Ref ECSTaskSecurityGroup
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 0
+        MaximumPercent: 100
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
       Tags:
         - Key: Name
-          Value: !Sub ${ProjectName}-${Environment}-admin-dashboard-service
+          Value: !Sub ${ProjectName}-${Environment}-admin-service
         - Key: Environment
           Value: !Ref Environment
         - Key: ManagedBy
           Value: CloudFormation
 
-  # ----------------------------------------------------------------------------
-  # EventBridge Rules for Scheduled Batch Tasks
-  # ----------------------------------------------------------------------------
-  StockAlertScheduleRole:
+  # -------------------------------------------------------------------------
+  # EventBridge Rule for Batch Execution (scheduled daily at 3:00 AM JST)
+  # -------------------------------------------------------------------------
+  BatchScheduleRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub ${ProjectName}-${Environment}-batch-schedule
+      Description: Daily batch execution at 3:00 AM JST
+      ScheduleExpression: cron(0 18 * * ? *)
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt ECSCluster.Arn
+          RoleArn: !GetAtt EventBridgeECSRole.Arn
+          Id: BatchTask
+          EcsParameters:
+            TaskDefinitionArn: !Ref BatchTaskDefinition
+            LaunchType: FARGATE
+            NetworkConfiguration:
+              AwsVpcConfiguration:
+                AssignPublicIp: DISABLED
+                Subnets:
+                  - !Ref PrivateSubnet1Id
+                  - !Ref PrivateSubnet2Id
+                SecurityGroups:
+                  - !Ref ECSTaskSecurityGroup
+
+  # EventBridge Role for ECS Task Execution
+  EventBridgeECSRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName: !Sub ${ProjectName}-${Environment}-eventbridge-ecs-role
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -664,97 +647,52 @@ Resources:
               Service: events.amazonaws.com
             Action: sts:AssumeRole
       Policies:
-        - PolicyName: RunECSTask
+        - PolicyName: ECSTaskExecution
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
                 Action:
                   - ecs:RunTask
-                Resource: !Ref BatchProcessingTaskDefinition
+                Resource: !Ref BatchTaskDefinition
               - Effect: Allow
                 Action:
                   - iam:PassRole
                 Resource:
                   - !GetAtt ECSTaskExecutionRole.Arn
-                  - !GetAtt ECSTaskRole.Arn
+                  - !GetAtt ECSTaskRoleBatch.Arn
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-eventbridge-ecs-role
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
-  # Stock Alert Job (Daily at 9:00 JST = 0:00 UTC)
-  StockAlertScheduleRule:
-    Type: AWS::Events::Rule
-    Properties:
-      Name: !Sub ${ProjectName}-${Environment}-stock-alert-schedule
-      Description: Run stock alert batch job daily at 9:00 JST
-      ScheduleExpression: 'cron(0 0 * * ? *)'
-      State: ENABLED
-      Targets:
-        - Arn: !GetAtt ECSCluster.Arn
-          RoleArn: !GetAtt StockAlertScheduleRole.Arn
-          Id: stock-alert-target
-          EcsParameters:
-            TaskDefinitionArn: !Ref BatchProcessingTaskDefinition
-            TaskCount: 1
-            LaunchType: FARGATE
-            NetworkConfiguration:
-              AwsVpcConfiguration:
-                AssignPublicIp: DISABLED
-                SecurityGroups:
-                  - !Ref ECSSecurityGroup
-                Subnets:
-                  - Fn::ImportValue: !Sub ${ProjectName}-${Environment}-private-subnet-1-id
-                  - Fn::ImportValue: !Sub ${ProjectName}-${Environment}-private-subnet-2-id
-          Input: '{"command": ["node", "dist/jobs/stock-alert.job.js"]}'
-
-  # Order Report Job (Weekly on Monday at 10:00 JST = 1:00 UTC)
-  OrderReportScheduleRule:
-    Type: AWS::Events::Rule
-    Properties:
-      Name: !Sub ${ProjectName}-${Environment}-order-report-schedule
-      Description: Run order report batch job weekly on Monday at 10:00 JST
-      ScheduleExpression: 'cron(0 1 ? * MON *)'
-      State: ENABLED
-      Targets:
-        - Arn: !GetAtt ECSCluster.Arn
-          RoleArn: !GetAtt StockAlertScheduleRole.Arn
-          Id: order-report-target
-          EcsParameters:
-            TaskDefinitionArn: !Ref BatchProcessingTaskDefinition
-            TaskCount: 1
-            LaunchType: FARGATE
-            NetworkConfiguration:
-              AwsVpcConfiguration:
-                AssignPublicIp: DISABLED
-                SecurityGroups:
-                  - !Ref ECSSecurityGroup
-                Subnets:
-                  - Fn::ImportValue: !Sub ${ProjectName}-${Environment}-private-subnet-1-id
-                  - Fn::ImportValue: !Sub ${ProjectName}-${Environment}-private-subnet-2-id
-          Input: '{"command": ["node", "dist/jobs/order-report.job.js"]}'
-
-# ==============================================================================
+# ===========================================================================
 # Outputs
-# ==============================================================================
+# ===========================================================================
 Outputs:
-  ALBEndpoint:
-    Description: Application Load Balancer DNS name
-    Value: !GetAtt ApplicationLoadBalancer.DNSName
-    Export:
-      Name: !Sub ${ProjectName}-${Environment}-alb-endpoint
-
   ECSClusterName:
-    Description: ECS Cluster name
+    Description: ECS Cluster Name
     Value: !Ref ECSCluster
     Export:
       Name: !Sub ${ProjectName}-${Environment}-ecs-cluster-name
 
+  ALBDNSName:
+    Description: ALB DNS Name
+    Value: !GetAtt ApplicationLoadBalancer.DNSName
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-alb-dns-name
+
   PublicWebServiceName:
-    Description: Public Web Service name
+    Description: Public Web Service Name
     Value: !GetAtt PublicWebService.Name
     Export:
       Name: !Sub ${ProjectName}-${Environment}-public-web-service-name
 
-  AdminDashboardServiceName:
-    Description: Admin Dashboard Service name
-    Value: !GetAtt AdminDashboardService.Name
+  AdminServiceName:
+    Description: Admin Service Name
+    Value: !GetAtt AdminService.Name
     Export:
-      Name: !Sub ${ProjectName}-${Environment}-admin-dashboard-service-name
+      Name: !Sub ${ProjectName}-${Environment}-admin-service-name

@@ -1,73 +1,39 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Service Account - Network Resources (VPC, Subnets, Transit Gateway Attachment)'
+Description: 'Service Account - Network Stack'
 
-# ==============================================================================
+# ===========================================================================
 # Parameters
-# ==============================================================================
+# ===========================================================================
 Parameters:
+  ProjectName:
+    Type: String
+    Default: sample-app
+    Description: Project name for resource naming
+
   Environment:
     Type: String
-    Description: Environment name
+    Default: dev
     AllowedValues:
       - dev
       - prod
-    Default: dev
-
-  ProjectName:
-    Type: String
-    Description: Project name
-    Default: sample-app
+    Description: Environment name
 
   ServiceVPCCIDR:
     Type: String
-    Description: Service VPC CIDR block
     Default: 10.1.0.0/16
-
-  PublicSubnet1CIDR:
-    Type: String
-    Description: Public Subnet 1 CIDR
-    Default: 10.1.1.0/24
-
-  PublicSubnet2CIDR:
-    Type: String
-    Description: Public Subnet 2 CIDR
-    Default: 10.1.2.0/24
-
-  PrivateSubnet1CIDR:
-    Type: String
-    Description: Private Subnet 1 CIDR
-    Default: 10.1.11.0/24
-
-  PrivateSubnet2CIDR:
-    Type: String
-    Description: Private Subnet 2 CIDR
-    Default: 10.1.12.0/24
-
-  DatabaseSubnet1CIDR:
-    Type: String
-    Description: Database Subnet 1 CIDR
-    Default: 10.1.21.0/24
-
-  DatabaseSubnet2CIDR:
-    Type: String
-    Description: Database Subnet 2 CIDR
-    Default: 10.1.22.0/24
-
-  PlatformAccountId:
-    Type: String
-    Description: AWS Account ID for Platform Account
+    Description: Service VPC CIDR
 
   TransitGatewayId:
     Type: String
-    Description: Transit Gateway ID (shared from Platform Account)
+    Description: Transit Gateway ID (from Platform Account)
 
-# ==============================================================================
+# ===========================================================================
 # Resources
-# ==============================================================================
+# ===========================================================================
 Resources:
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
   # VPC
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
   ServiceVPC:
     Type: AWS::EC2::VPC
     Properties:
@@ -82,9 +48,9 @@ Resources:
         - Key: ManagedBy
           Value: CloudFormation
 
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
   # Internet Gateway
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
   InternetGateway:
     Type: AWS::EC2::InternetGateway
     Properties:
@@ -102,19 +68,19 @@ Resources:
       VpcId: !Ref ServiceVPC
       InternetGatewayId: !Ref InternetGateway
 
-  # ----------------------------------------------------------------------------
-  # Public Subnets (for ALB)
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
+  # Public Subnets
+  # -------------------------------------------------------------------------
   PublicSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref ServiceVPC
-      CidrBlock: !Ref PublicSubnet1CIDR
+      CidrBlock: 10.1.1.0/24
       AvailabilityZone: !Select [0, !GetAZs '']
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: !Sub ${ProjectName}-${Environment}-service-public-subnet-1
+          Value: !Sub ${ProjectName}-${Environment}-service-public-1a
         - Key: Environment
           Value: !Ref Environment
         - Key: ManagedBy
@@ -124,29 +90,29 @@ Resources:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref ServiceVPC
-      CidrBlock: !Ref PublicSubnet2CIDR
+      CidrBlock: 10.1.2.0/24
       AvailabilityZone: !Select [1, !GetAZs '']
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: !Sub ${ProjectName}-${Environment}-service-public-subnet-2
+          Value: !Sub ${ProjectName}-${Environment}-service-public-1c
         - Key: Environment
           Value: !Ref Environment
         - Key: ManagedBy
           Value: CloudFormation
 
-  # ----------------------------------------------------------------------------
-  # Private Subnets (for ECS Fargate)
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
+  # Private Subnets
+  # -------------------------------------------------------------------------
   PrivateSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref ServiceVPC
-      CidrBlock: !Ref PrivateSubnet1CIDR
+      CidrBlock: 10.1.11.0/24
       AvailabilityZone: !Select [0, !GetAZs '']
       Tags:
         - Key: Name
-          Value: !Sub ${ProjectName}-${Environment}-service-private-subnet-1
+          Value: !Sub ${ProjectName}-${Environment}-service-private-1a
         - Key: Environment
           Value: !Ref Environment
         - Key: ManagedBy
@@ -156,28 +122,28 @@ Resources:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref ServiceVPC
-      CidrBlock: !Ref PrivateSubnet2CIDR
+      CidrBlock: 10.1.12.0/24
       AvailabilityZone: !Select [1, !GetAZs '']
       Tags:
         - Key: Name
-          Value: !Sub ${ProjectName}-${Environment}-service-private-subnet-2
+          Value: !Sub ${ProjectName}-${Environment}-service-private-1c
         - Key: Environment
           Value: !Ref Environment
         - Key: ManagedBy
           Value: CloudFormation
 
-  # ----------------------------------------------------------------------------
-  # Database Subnets (for RDS)
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
+  # Database Subnets
+  # -------------------------------------------------------------------------
   DatabaseSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref ServiceVPC
-      CidrBlock: !Ref DatabaseSubnet1CIDR
+      CidrBlock: 10.1.21.0/24
       AvailabilityZone: !Select [0, !GetAZs '']
       Tags:
         - Key: Name
-          Value: !Sub ${ProjectName}-${Environment}-service-db-subnet-1
+          Value: !Sub ${ProjectName}-${Environment}-service-database-1a
         - Key: Environment
           Value: !Ref Environment
         - Key: ManagedBy
@@ -187,48 +153,75 @@ Resources:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref ServiceVPC
-      CidrBlock: !Ref DatabaseSubnet2CIDR
+      CidrBlock: 10.1.22.0/24
       AvailabilityZone: !Select [1, !GetAZs '']
       Tags:
         - Key: Name
-          Value: !Sub ${ProjectName}-${Environment}-service-db-subnet-2
+          Value: !Sub ${ProjectName}-${Environment}-service-database-1c
         - Key: Environment
           Value: !Ref Environment
         - Key: ManagedBy
           Value: CloudFormation
 
-  # ----------------------------------------------------------------------------
-  # NAT Gateway
-  # ----------------------------------------------------------------------------
-  NATGatewayEIP:
+  # -------------------------------------------------------------------------
+  # NAT Gateways
+  # -------------------------------------------------------------------------
+  NatGateway1EIP:
     Type: AWS::EC2::EIP
     DependsOn: AttachGateway
     Properties:
       Domain: vpc
       Tags:
         - Key: Name
-          Value: !Sub ${ProjectName}-${Environment}-service-nat-eip
+          Value: !Sub ${ProjectName}-${Environment}-service-nat-eip-1a
         - Key: Environment
           Value: !Ref Environment
         - Key: ManagedBy
           Value: CloudFormation
 
-  NATGateway:
+  NatGateway2EIP:
+    Type: AWS::EC2::EIP
+    DependsOn: AttachGateway
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-service-nat-eip-1c
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  NatGateway1:
     Type: AWS::EC2::NatGateway
     Properties:
-      AllocationId: !GetAtt NATGatewayEIP.AllocationId
+      AllocationId: !GetAtt NatGateway1EIP.AllocationId
       SubnetId: !Ref PublicSubnet1
       Tags:
         - Key: Name
-          Value: !Sub ${ProjectName}-${Environment}-service-nat-gw
+          Value: !Sub ${ProjectName}-${Environment}-service-nat-1a
         - Key: Environment
           Value: !Ref Environment
         - Key: ManagedBy
           Value: CloudFormation
 
-  # ----------------------------------------------------------------------------
+  NatGateway2:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGateway2EIP.AllocationId
+      SubnetId: !Ref PublicSubnet2
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-service-nat-1c
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # -------------------------------------------------------------------------
   # Route Tables
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
+  # Public Route Table
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
@@ -261,13 +254,14 @@ Resources:
       SubnetId: !Ref PublicSubnet2
       RouteTableId: !Ref PublicRouteTable
 
+  # Private Route Table 1 (AZ-1a)
   PrivateRouteTable1:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref ServiceVPC
       Tags:
         - Key: Name
-          Value: !Sub ${ProjectName}-${Environment}-service-private-rt-1
+          Value: !Sub ${ProjectName}-${Environment}-service-private-rt-1a
         - Key: Environment
           Value: !Ref Environment
         - Key: ManagedBy
@@ -278,7 +272,7 @@ Resources:
     Properties:
       RouteTableId: !Ref PrivateRouteTable1
       DestinationCidrBlock: 0.0.0.0/0
-      NatGatewayId: !Ref NATGateway
+      NatGatewayId: !Ref NatGateway1
 
   PrivateSubnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
@@ -286,13 +280,14 @@ Resources:
       SubnetId: !Ref PrivateSubnet1
       RouteTableId: !Ref PrivateRouteTable1
 
+  # Private Route Table 2 (AZ-1c)
   PrivateRouteTable2:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref ServiceVPC
       Tags:
         - Key: Name
-          Value: !Sub ${ProjectName}-${Environment}-service-private-rt-2
+          Value: !Sub ${ProjectName}-${Environment}-service-private-rt-1c
         - Key: Environment
           Value: !Ref Environment
         - Key: ManagedBy
@@ -303,7 +298,7 @@ Resources:
     Properties:
       RouteTableId: !Ref PrivateRouteTable2
       DestinationCidrBlock: 0.0.0.0/0
-      NatGatewayId: !Ref NATGateway
+      NatGatewayId: !Ref NatGateway2
 
   PrivateSubnet2RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
@@ -311,13 +306,14 @@ Resources:
       SubnetId: !Ref PrivateSubnet2
       RouteTableId: !Ref PrivateRouteTable2
 
-  DatabaseRouteTable:
+  # Database Route Table 1 (AZ-1a)
+  DatabaseRouteTable1:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref ServiceVPC
       Tags:
         - Key: Name
-          Value: !Sub ${ProjectName}-${Environment}-service-db-rt
+          Value: !Sub ${ProjectName}-${Environment}-service-database-rt-1a
         - Key: Environment
           Value: !Ref Environment
         - Key: ManagedBy
@@ -327,18 +323,31 @@ Resources:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref DatabaseSubnet1
-      RouteTableId: !Ref DatabaseRouteTable
+      RouteTableId: !Ref DatabaseRouteTable1
+
+  # Database Route Table 2 (AZ-1c)
+  DatabaseRouteTable2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref ServiceVPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-service-database-rt-1c
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
   DatabaseSubnet2RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref DatabaseSubnet2
-      RouteTableId: !Ref DatabaseRouteTable
+      RouteTableId: !Ref DatabaseRouteTable2
 
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
   # Transit Gateway Attachment
-  # ----------------------------------------------------------------------------
-  ServiceVPCAttachment:
+  # -------------------------------------------------------------------------
+  TransitGatewayAttachment:
     Type: AWS::EC2::TransitGatewayAttachment
     Properties:
       TransitGatewayId: !Ref TransitGatewayId
@@ -354,114 +363,175 @@ Resources:
         - Key: ManagedBy
           Value: CloudFormation
 
-  # Transit Gateway Routes (to Platform VPC)
-  TGWRoutePrivate1:
+  # Route to Platform VPC via Transit Gateway (Private Route Table 1)
+  PrivateRouteToPlatform1:
     Type: AWS::EC2::Route
-    DependsOn: ServiceVPCAttachment
+    DependsOn: TransitGatewayAttachment
     Properties:
       RouteTableId: !Ref PrivateRouteTable1
       DestinationCidrBlock: 10.0.0.0/16
       TransitGatewayId: !Ref TransitGatewayId
 
-  TGWRoutePrivate2:
+  # Route to Platform VPC via Transit Gateway (Private Route Table 2)
+  PrivateRouteToPlatform2:
     Type: AWS::EC2::Route
-    DependsOn: ServiceVPCAttachment
+    DependsOn: TransitGatewayAttachment
     Properties:
       RouteTableId: !Ref PrivateRouteTable2
       DestinationCidrBlock: 10.0.0.0/16
       TransitGatewayId: !Ref TransitGatewayId
 
-  # VPC Flow Logs
-  ServiceVPCFlowLogGroup:
-    Type: AWS::Logs::LogGroup
+  # -------------------------------------------------------------------------
+  # VPC Endpoints (for cost optimization and security)
+  # -------------------------------------------------------------------------
+  # S3 VPC Endpoint (Gateway type - no cost)
+  S3VpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
     Properties:
-      LogGroupName: /aws/vpc/service-vpc-flow-logs
-      RetentionInDays: 7
+      VpcId: !Ref ServiceVPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.s3
+      RouteTableIds:
+        - !Ref PrivateRouteTable1
+        - !Ref PrivateRouteTable2
+      VpcEndpointType: Gateway
 
-  VPCFlowLogsRole:
-    Type: AWS::IAM::Role
+  # ECR API VPC Endpoint (Interface type)
+  EcrApiVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
     Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: vpc-flow-logs.amazonaws.com
-            Action: sts:AssumeRole
-      Policies:
-        - PolicyName: CloudWatchLogPolicy
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - logs:CreateLogGroup
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                  - logs:DescribeLogGroups
-                  - logs:DescribeLogStreams
-                Resource: '*'
+      VpcId: !Ref ServiceVPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ecr.api
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      SecurityGroupIds:
+        - !Ref VpcEndpointSecurityGroup
 
-  ServiceVPCFlowLog:
-    Type: AWS::EC2::FlowLog
+  # ECR DKR VPC Endpoint (Interface type)
+  EcrDkrVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
     Properties:
-      ResourceType: VPC
-      ResourceIds:
-        - !Ref ServiceVPC
-      TrafficType: ALL
-      LogDestinationType: cloud-watch-logs
-      LogGroupName: !Ref ServiceVPCFlowLogGroup
-      DeliverLogsPermissionArn: !GetAtt VPCFlowLogsRole.Arn
+      VpcId: !Ref ServiceVPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ecr.dkr
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      SecurityGroupIds:
+        - !Ref VpcEndpointSecurityGroup
+
+  # CloudWatch Logs VPC Endpoint (Interface type)
+  LogsVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref ServiceVPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.logs
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      SecurityGroupIds:
+        - !Ref VpcEndpointSecurityGroup
+
+  # Secrets Manager VPC Endpoint (Interface type)
+  SecretsManagerVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref ServiceVPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.secretsmanager
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      SecurityGroupIds:
+        - !Ref VpcEndpointSecurityGroup
+
+  # Security Group for VPC Endpoints
+  VpcEndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${ProjectName}-${Environment}-vpc-endpoint-sg
+      GroupDescription: Security Group for VPC Endpoints
+      VpcId: !Ref ServiceVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Ref ServiceVPCCIDR
+          Description: Allow HTTPS from VPC
       Tags:
         - Key: Name
-          Value: !Sub ${ProjectName}-${Environment}-service-vpc-flow-log
+          Value: !Sub ${ProjectName}-${Environment}-vpc-endpoint-sg
         - Key: Environment
           Value: !Ref Environment
         - Key: ManagedBy
           Value: CloudFormation
 
-# ==============================================================================
+# ===========================================================================
 # Outputs
-# ==============================================================================
+# ===========================================================================
 Outputs:
-  ServiceVPCId:
+  VpcId:
     Description: Service VPC ID
     Value: !Ref ServiceVPC
     Export:
       Name: !Sub ${ProjectName}-${Environment}-service-vpc-id
 
+  VpcCidr:
+    Description: Service VPC CIDR
+    Value: !Ref ServiceVPCCIDR
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-service-vpc-cidr
+
   PublicSubnet1Id:
-    Description: Public Subnet 1 ID
+    Description: Public Subnet 1 ID (AZ-1a)
     Value: !Ref PublicSubnet1
     Export:
-      Name: !Sub ${ProjectName}-${Environment}-public-subnet-1-id
+      Name: !Sub ${ProjectName}-${Environment}-service-public-subnet-1a
 
   PublicSubnet2Id:
-    Description: Public Subnet 2 ID
+    Description: Public Subnet 2 ID (AZ-1c)
     Value: !Ref PublicSubnet2
     Export:
-      Name: !Sub ${ProjectName}-${Environment}-public-subnet-2-id
+      Name: !Sub ${ProjectName}-${Environment}-service-public-subnet-1c
 
   PrivateSubnet1Id:
-    Description: Private Subnet 1 ID
+    Description: Private Subnet 1 ID (AZ-1a)
     Value: !Ref PrivateSubnet1
     Export:
-      Name: !Sub ${ProjectName}-${Environment}-private-subnet-1-id
+      Name: !Sub ${ProjectName}-${Environment}-service-private-subnet-1a
 
   PrivateSubnet2Id:
-    Description: Private Subnet 2 ID
+    Description: Private Subnet 2 ID (AZ-1c)
     Value: !Ref PrivateSubnet2
     Export:
-      Name: !Sub ${ProjectName}-${Environment}-private-subnet-2-id
+      Name: !Sub ${ProjectName}-${Environment}-service-private-subnet-1c
 
   DatabaseSubnet1Id:
-    Description: Database Subnet 1 ID
+    Description: Database Subnet 1 ID (AZ-1a)
     Value: !Ref DatabaseSubnet1
     Export:
-      Name: !Sub ${ProjectName}-${Environment}-database-subnet-1-id
+      Name: !Sub ${ProjectName}-${Environment}-service-database-subnet-1a
 
   DatabaseSubnet2Id:
-    Description: Database Subnet 2 ID
+    Description: Database Subnet 2 ID (AZ-1c)
     Value: !Ref DatabaseSubnet2
     Export:
-      Name: !Sub ${ProjectName}-${Environment}-database-subnet-2-id
+      Name: !Sub ${ProjectName}-${Environment}-service-database-subnet-1c
+
+  TransitGatewayAttachmentId:
+    Description: Transit Gateway Attachment ID (Service VPC)
+    Value: !Ref TransitGatewayAttachment
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-service-tgw-attachment-id
+
+  VpcEndpointSecurityGroupId:
+    Description: VPC Endpoint Security Group ID
+    Value: !Ref VpcEndpointSecurityGroup
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-vpc-endpoint-sg-id

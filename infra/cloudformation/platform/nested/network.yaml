@@ -1,49 +1,39 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Platform Account - Network Resources (VPC, Subnets, NAT Gateway)'
+Description: 'Platform Account - Network Stack (Nested)'
 
-# ==============================================================================
+# ===========================================================================
 # Parameters
-# ==============================================================================
+# ===========================================================================
 Parameters:
-  Environment:
-    Type: String
-    Description: Environment name
-
   ProjectName:
     Type: String
-    Description: Project name
+    Default: sample-app
+    Description: Project name for resource naming
 
-  PlatformVPCCIDR:
+  Environment:
     Type: String
-    Description: Platform VPC CIDR block
+    Default: dev
+    AllowedValues:
+      - dev
+      - prod
+    Description: Environment name
 
-  PublicSubnet1CIDR:
+  VpcCidr:
     Type: String
-    Description: Public Subnet 1 CIDR
+    Default: 10.0.0.0/16
+    Description: Platform VPC CIDR
 
-  PublicSubnet2CIDR:
-    Type: String
-    Description: Public Subnet 2 CIDR
-
-  PrivateSubnet1CIDR:
-    Type: String
-    Description: Private Subnet 1 CIDR
-
-  PrivateSubnet2CIDR:
-    Type: String
-    Description: Private Subnet 2 CIDR
-
-# ==============================================================================
+# ===========================================================================
 # Resources
-# ==============================================================================
+# ===========================================================================
 Resources:
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
   # VPC
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
   PlatformVPC:
     Type: AWS::EC2::VPC
     Properties:
-      CidrBlock: !Ref PlatformVPCCIDR
+      CidrBlock: !Ref VpcCidr
       EnableDnsHostnames: true
       EnableDnsSupport: true
       Tags:
@@ -54,9 +44,9 @@ Resources:
         - Key: ManagedBy
           Value: CloudFormation
 
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
   # Internet Gateway
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
   InternetGateway:
     Type: AWS::EC2::InternetGateway
     Properties:
@@ -74,19 +64,19 @@ Resources:
       VpcId: !Ref PlatformVPC
       InternetGatewayId: !Ref InternetGateway
 
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
   # Public Subnets
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
   PublicSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref PlatformVPC
-      CidrBlock: !Ref PublicSubnet1CIDR
+      CidrBlock: 10.0.1.0/24
       AvailabilityZone: !Select [0, !GetAZs '']
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: !Sub ${ProjectName}-${Environment}-platform-public-subnet-1
+          Value: !Sub ${ProjectName}-${Environment}-platform-public-1a
         - Key: Environment
           Value: !Ref Environment
         - Key: ManagedBy
@@ -96,29 +86,29 @@ Resources:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref PlatformVPC
-      CidrBlock: !Ref PublicSubnet2CIDR
+      CidrBlock: 10.0.2.0/24
       AvailabilityZone: !Select [1, !GetAZs '']
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: !Sub ${ProjectName}-${Environment}-platform-public-subnet-2
+          Value: !Sub ${ProjectName}-${Environment}-platform-public-1c
         - Key: Environment
           Value: !Ref Environment
         - Key: ManagedBy
           Value: CloudFormation
 
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
   # Private Subnets
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
   PrivateSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref PlatformVPC
-      CidrBlock: !Ref PrivateSubnet1CIDR
+      CidrBlock: 10.0.11.0/24
       AvailabilityZone: !Select [0, !GetAZs '']
       Tags:
         - Key: Name
-          Value: !Sub ${ProjectName}-${Environment}-platform-private-subnet-1
+          Value: !Sub ${ProjectName}-${Environment}-platform-private-1a
         - Key: Environment
           Value: !Ref Environment
         - Key: ManagedBy
@@ -128,48 +118,106 @@ Resources:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref PlatformVPC
-      CidrBlock: !Ref PrivateSubnet2CIDR
+      CidrBlock: 10.0.12.0/24
       AvailabilityZone: !Select [1, !GetAZs '']
       Tags:
         - Key: Name
-          Value: !Sub ${ProjectName}-${Environment}-platform-private-subnet-2
+          Value: !Sub ${ProjectName}-${Environment}-platform-private-1c
         - Key: Environment
           Value: !Ref Environment
         - Key: ManagedBy
           Value: CloudFormation
 
-  # ----------------------------------------------------------------------------
-  # NAT Gateway (for Private Subnets)
-  # ----------------------------------------------------------------------------
-  NATGatewayEIP:
+  # -------------------------------------------------------------------------
+  # Transit Gateway Subnets
+  # -------------------------------------------------------------------------
+  TgwSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref PlatformVPC
+      CidrBlock: 10.0.21.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-platform-tgw-1a
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  TgwSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref PlatformVPC
+      CidrBlock: 10.0.22.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-platform-tgw-1c
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # -------------------------------------------------------------------------
+  # NAT Gateways
+  # -------------------------------------------------------------------------
+  NatGateway1EIP:
     Type: AWS::EC2::EIP
     DependsOn: AttachGateway
     Properties:
       Domain: vpc
       Tags:
         - Key: Name
-          Value: !Sub ${ProjectName}-${Environment}-platform-nat-eip
+          Value: !Sub ${ProjectName}-${Environment}-platform-nat-eip-1a
         - Key: Environment
           Value: !Ref Environment
         - Key: ManagedBy
           Value: CloudFormation
 
-  NATGateway:
+  NatGateway2EIP:
+    Type: AWS::EC2::EIP
+    DependsOn: AttachGateway
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-platform-nat-eip-1c
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  NatGateway1:
     Type: AWS::EC2::NatGateway
     Properties:
-      AllocationId: !GetAtt NATGatewayEIP.AllocationId
+      AllocationId: !GetAtt NatGateway1EIP.AllocationId
       SubnetId: !Ref PublicSubnet1
       Tags:
         - Key: Name
-          Value: !Sub ${ProjectName}-${Environment}-platform-nat-gw
+          Value: !Sub ${ProjectName}-${Environment}-platform-nat-1a
         - Key: Environment
           Value: !Ref Environment
         - Key: ManagedBy
           Value: CloudFormation
 
-  # ----------------------------------------------------------------------------
+  NatGateway2:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGateway2EIP.AllocationId
+      SubnetId: !Ref PublicSubnet2
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-platform-nat-1c
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # -------------------------------------------------------------------------
   # Route Tables
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
+  # Public Route Table
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
@@ -202,13 +250,14 @@ Resources:
       SubnetId: !Ref PublicSubnet2
       RouteTableId: !Ref PublicRouteTable
 
+  # Private Route Table 1 (AZ-1a)
   PrivateRouteTable1:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref PlatformVPC
       Tags:
         - Key: Name
-          Value: !Sub ${ProjectName}-${Environment}-platform-private-rt-1
+          Value: !Sub ${ProjectName}-${Environment}-platform-private-rt-1a
         - Key: Environment
           Value: !Ref Environment
         - Key: ManagedBy
@@ -219,7 +268,7 @@ Resources:
     Properties:
       RouteTableId: !Ref PrivateRouteTable1
       DestinationCidrBlock: 0.0.0.0/0
-      NatGatewayId: !Ref NATGateway
+      NatGatewayId: !Ref NatGateway1
 
   PrivateSubnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
@@ -227,13 +276,14 @@ Resources:
       SubnetId: !Ref PrivateSubnet1
       RouteTableId: !Ref PrivateRouteTable1
 
+  # Private Route Table 2 (AZ-1c)
   PrivateRouteTable2:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref PlatformVPC
       Tags:
         - Key: Name
-          Value: !Sub ${ProjectName}-${Environment}-platform-private-rt-2
+          Value: !Sub ${ProjectName}-${Environment}-platform-private-rt-1c
         - Key: Environment
           Value: !Ref Environment
         - Key: ManagedBy
@@ -244,7 +294,7 @@ Resources:
     Properties:
       RouteTableId: !Ref PrivateRouteTable2
       DestinationCidrBlock: 0.0.0.0/0
-      NatGatewayId: !Ref NATGateway
+      NatGatewayId: !Ref NatGateway2
 
   PrivateSubnet2RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
@@ -252,34 +302,108 @@ Resources:
       SubnetId: !Ref PrivateSubnet2
       RouteTableId: !Ref PrivateRouteTable2
 
-# ==============================================================================
+  # Transit Gateway Route Table 1 (AZ-1a)
+  TgwRouteTable1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref PlatformVPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-platform-tgw-rt-1a
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  TgwSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref TgwSubnet1
+      RouteTableId: !Ref TgwRouteTable1
+
+  # Transit Gateway Route Table 2 (AZ-1c)
+  TgwRouteTable2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref PlatformVPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-platform-tgw-rt-1c
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  TgwSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref TgwSubnet2
+      RouteTableId: !Ref TgwRouteTable2
+
+# ===========================================================================
 # Outputs
-# ==============================================================================
+# ===========================================================================
 Outputs:
-  PlatformVPCId:
+  VpcId:
     Description: Platform VPC ID
     Value: !Ref PlatformVPC
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-platform-vpc-id
+
+  VpcCidr:
+    Description: Platform VPC CIDR
+    Value: !Ref VpcCidr
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-platform-vpc-cidr
 
   PublicSubnet1Id:
-    Description: Public Subnet 1 ID
+    Description: Public Subnet 1 ID (AZ-1a)
     Value: !Ref PublicSubnet1
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-platform-public-subnet-1a
 
   PublicSubnet2Id:
-    Description: Public Subnet 2 ID
+    Description: Public Subnet 2 ID (AZ-1c)
     Value: !Ref PublicSubnet2
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-platform-public-subnet-1c
 
   PrivateSubnet1Id:
-    Description: Private Subnet 1 ID
+    Description: Private Subnet 1 ID (AZ-1a)
     Value: !Ref PrivateSubnet1
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-platform-private-subnet-1a
 
   PrivateSubnet2Id:
-    Description: Private Subnet 2 ID
+    Description: Private Subnet 2 ID (AZ-1c)
     Value: !Ref PrivateSubnet2
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-platform-private-subnet-1c
+
+  TgwSubnet1Id:
+    Description: Transit Gateway Subnet 1 ID (AZ-1a)
+    Value: !Ref TgwSubnet1
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-platform-tgw-subnet-1a
+
+  TgwSubnet2Id:
+    Description: Transit Gateway Subnet 2 ID (AZ-1c)
+    Value: !Ref TgwSubnet2
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-platform-tgw-subnet-1c
 
   PrivateRouteTable1Id:
-    Description: Private Route Table 1 ID
+    Description: Private Route Table 1 ID (AZ-1a)
     Value: !Ref PrivateRouteTable1
 
   PrivateRouteTable2Id:
-    Description: Private Route Table 2 ID
+    Description: Private Route Table 2 ID (AZ-1c)
     Value: !Ref PrivateRouteTable2
+
+  TgwRouteTable1Id:
+    Description: Transit Gateway Route Table 1 ID (AZ-1a)
+    Value: !Ref TgwRouteTable1
+
+  TgwRouteTable2Id:
+    Description: Transit Gateway Route Table 2 ID (AZ-1c)
+    Value: !Ref TgwRouteTable2

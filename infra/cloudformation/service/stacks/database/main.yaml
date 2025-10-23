@@ -1,87 +1,85 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Service Account - Database Resources (RDS PostgreSQL, Secrets Manager)'
+Description: 'Service Account - Database Stack (RDS PostgreSQL)'
 
-# ==============================================================================
+# ===========================================================================
 # Parameters
-# ==============================================================================
+# ===========================================================================
 Parameters:
+  ProjectName:
+    Type: String
+    Default: sample-app
+    Description: Project name for resource naming
+
   Environment:
     Type: String
-    Description: Environment name
+    Default: dev
     AllowedValues:
       - dev
       - prod
-    Default: dev
+    Description: Environment name
 
-  ProjectName:
+  VpcId:
     Type: String
-    Description: Project name
-    Default: sample-app
+    Description: Service VPC ID
+
+  DatabaseSubnet1Id:
+    Type: String
+    Description: Database Subnet 1 ID
+
+  DatabaseSubnet2Id:
+    Type: String
+    Description: Database Subnet 2 ID
+
+  DBInstanceClass:
+    Type: String
+    Default: db.t3.medium
+    AllowedValues:
+      - db.t3.micro
+      - db.t3.small
+      - db.t3.medium
+      - db.r6g.large
+      - db.r6g.xlarge
+    Description: RDS instance class
+
+  DBAllocatedStorage:
+    Type: Number
+    Default: 100
+    MinValue: 20
+    MaxValue: 1000
+    Description: Allocated storage in GB
 
   DBMasterUsername:
     Type: String
-    Description: Database master username
     Default: postgres
-
-  DBMasterPasswordSecretArn:
-    Type: String
-    Description: Secrets Manager ARN for database master password
+    Description: Master username for RDS
 
   DBName:
     Type: String
+    Default: sampleappdb
     Description: Database name
-    Default: sampledb
 
-# ==============================================================================
-# Conditions
-# ==============================================================================
-Conditions:
-  IsProduction: !Equals [!Ref Environment, prod]
+  DBBackupRetentionPeriod:
+    Type: Number
+    Default: 7
+    MinValue: 0
+    MaxValue: 35
+    Description: Backup retention period in days
 
-# ==============================================================================
+# ===========================================================================
 # Resources
-# ==============================================================================
+# ===========================================================================
 Resources:
-  # ----------------------------------------------------------------------------
-  # Security Group for RDS
-  # ----------------------------------------------------------------------------
-  DBSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Security group for RDS PostgreSQL
-      VpcId:
-        Fn::ImportValue: !Sub ${ProjectName}-${Environment}-service-vpc-id
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 5432
-          ToPort: 5432
-          SourceSecurityGroupId:
-            Fn::ImportValue: !Sub ${ProjectName}-${Environment}-ecs-security-group-id
-          Description: Allow from ECS tasks
-        - IpProtocol: tcp
-          FromPort: 5432
-          ToPort: 5432
-          CidrIp: 10.0.0.0/16
-          Description: Allow from Platform VPC (VPN access)
-      Tags:
-        - Key: Name
-          Value: !Sub ${ProjectName}-${Environment}-db-sg
-        - Key: Environment
-          Value: !Ref Environment
-        - Key: ManagedBy
-          Value: CloudFormation
-
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
   # DB Subnet Group
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
   DBSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup
     Properties:
       DBSubnetGroupName: !Sub ${ProjectName}-${Environment}-db-subnet-group
-      DBSubnetGroupDescription: Database subnet group
+      DBSubnetGroupDescription: Subnet group for RDS PostgreSQL
       SubnetIds:
-        - Fn::ImportValue: !Sub ${ProjectName}-${Environment}-database-subnet-1-id
-        - Fn::ImportValue: !Sub ${ProjectName}-${Environment}-database-subnet-2-id
+        - !Ref DatabaseSubnet1Id
+        - !Ref DatabaseSubnet2Id
       Tags:
         - Key: Name
           Value: !Sub ${ProjectName}-${Environment}-db-subnet-group
@@ -90,99 +88,147 @@ Resources:
         - Key: ManagedBy
           Value: CloudFormation
 
-  # ----------------------------------------------------------------------------
-  # KMS Key for RDS Encryption
-  # ----------------------------------------------------------------------------
-  DBEncryptionKey:
-    Type: AWS::KMS::Key
+  # -------------------------------------------------------------------------
+  # Security Group for RDS
+  # -------------------------------------------------------------------------
+  DBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
     Properties:
-      Description: !Sub KMS key for ${ProjectName}-${Environment} RDS encryption
-      KeyPolicy:
-        Version: '2012-10-17'
-        Statement:
-          - Sid: Enable IAM User Permissions
-            Effect: Allow
-            Principal:
-              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
-            Action: kms:*
-            Resource: '*'
-          - Sid: Allow RDS to use the key
-            Effect: Allow
-            Principal:
-              Service: rds.amazonaws.com
-            Action:
-              - kms:Decrypt
-              - kms:DescribeKey
-              - kms:CreateGrant
-            Resource: '*'
+      GroupName: !Sub ${ProjectName}-${Environment}-rds-sg
+      GroupDescription: Security Group for RDS PostgreSQL
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        # Allow PostgreSQL from Private Subnets (ECS Tasks)
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: 10.1.11.0/24
+          Description: Allow PostgreSQL from Private Subnet 1a
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: 10.1.12.0/24
+          Description: Allow PostgreSQL from Private Subnet 1c
+        # Allow PostgreSQL from Platform VPC (VPN access for admin)
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: 10.0.0.0/16
+          Description: Allow PostgreSQL from Platform VPC (VPN)
       Tags:
         - Key: Name
-          Value: !Sub ${ProjectName}-${Environment}-db-encryption-key
+          Value: !Sub ${ProjectName}-${Environment}-rds-sg
         - Key: Environment
           Value: !Ref Environment
         - Key: ManagedBy
           Value: CloudFormation
 
-  DBEncryptionKeyAlias:
-    Type: AWS::KMS::Alias
+  # -------------------------------------------------------------------------
+  # Secrets Manager - DB Master Password
+  # -------------------------------------------------------------------------
+  DBMasterPassword:
+    Type: AWS::SecretsManager::Secret
     Properties:
-      AliasName: !Sub alias/${ProjectName}-${Environment}-db-encryption
-      TargetKeyId: !Ref DBEncryptionKey
+      Name: !Sub ${ProjectName}/${Environment}/db-master-password
+      Description: RDS Master Password
+      GenerateSecretString:
+        SecretStringTemplate: !Sub '{"username": "${DBMasterUsername}"}'
+        GenerateStringKey: password
+        PasswordLength: 32
+        ExcludeCharacters: '"@/\'
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-db-master-password
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
 
-  # ----------------------------------------------------------------------------
-  # RDS PostgreSQL Instance
-  # ----------------------------------------------------------------------------
-  RDSInstance:
+  # -------------------------------------------------------------------------
+  # RDS Parameter Group
+  # -------------------------------------------------------------------------
+  DBParameterGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      DBParameterGroupName: !Sub ${ProjectName}-${Environment}-postgres15-params
+      Description: Custom parameter group for PostgreSQL 15
+      Family: postgres15
+      Parameters:
+        max_connections: '200'
+        shared_buffers: '{DBInstanceClassMemory/32768}'
+        effective_cache_size: '{DBInstanceClassMemory/16384}'
+        work_mem: '16384'
+        maintenance_work_mem: '524288'
+        log_min_duration_statement: '1000'
+        log_connections: '1'
+        log_disconnections: '1'
+        log_duration: '0'
+        log_statement: 'ddl'
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${Environment}-postgres15-params
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # -------------------------------------------------------------------------
+  # RDS Instance (Multi-AZ)
+  # -------------------------------------------------------------------------
+  DBInstance:
     Type: AWS::RDS::DBInstance
     DeletionPolicy: Snapshot
     UpdateReplacePolicy: Snapshot
     Properties:
-      DBInstanceIdentifier: !Sub ${ProjectName}-${Environment}-db
+      DBInstanceIdentifier: !Sub ${ProjectName}-${Environment}-postgres
       DBName: !Ref DBName
       Engine: postgres
-      EngineVersion: '14.10'
-      DBInstanceClass: !If [IsProduction, db.r5.large, db.t3.micro]
-      AllocatedStorage: 20
-      MaxAllocatedStorage: 100
+      EngineVersion: '15.4'
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: !Ref DBAllocatedStorage
       StorageType: gp3
       StorageEncrypted: true
-      KmsKeyId: !Ref DBEncryptionKey
+      Iops: 3000
       MasterUsername: !Ref DBMasterUsername
-      MasterUserPassword: !Sub '{{resolve:secretsmanager:${DBMasterPasswordSecretArn}:SecretString:password}}'
+      MasterUserPassword: !Sub '{{resolve:secretsmanager:${DBMasterPassword}:SecretString:password}}'
       DBSubnetGroupName: !Ref DBSubnetGroup
       VPCSecurityGroups:
         - !Ref DBSecurityGroup
-      MultiAZ: !If [IsProduction, true, false]
+      DBParameterGroupName: !Ref DBParameterGroup
+      MultiAZ: true
       PubliclyAccessible: false
-      BackupRetentionPeriod: !If [IsProduction, 7, 1]
-      PreferredBackupWindow: '03:00-04:00'
-      PreferredMaintenanceWindow: 'sun:04:00-sun:05:00'
+      BackupRetentionPeriod: !Ref DBBackupRetentionPeriod
+      PreferredBackupWindow: '18:00-19:00'
+      PreferredMaintenanceWindow: 'sun:19:00-sun:20:00'
       EnableCloudwatchLogsExports:
         - postgresql
-      DeletionProtection: !If [IsProduction, true, false]
+        - upgrade
+      AutoMinorVersionUpgrade: true
+      DeletionProtection: false
+      CopyTagsToSnapshot: true
       Tags:
         - Key: Name
-          Value: !Sub ${ProjectName}-${Environment}-db
+          Value: !Sub ${ProjectName}-${Environment}-postgres
         - Key: Environment
           Value: !Ref Environment
         - Key: ManagedBy
           Value: CloudFormation
 
-  # ----------------------------------------------------------------------------
-  # Secrets Manager Secret for Application (includes DB endpoint)
-  # ----------------------------------------------------------------------------
-  AppDBSecret:
+  # -------------------------------------------------------------------------
+  # Secrets Manager - DB Connection String
+  # -------------------------------------------------------------------------
+  DBConnectionString:
     Type: AWS::SecretsManager::Secret
     Properties:
       Name: !Sub ${ProjectName}/${Environment}/db-connection
-      Description: Database connection information for applications
+      Description: RDS Connection Information
       SecretString: !Sub |
         {
-          "host": "${RDSInstance.Endpoint.Address}",
-          "port": ${RDSInstance.Endpoint.Port},
+          "host": "${DBInstance.Endpoint.Address}",
+          "port": "${DBInstance.Endpoint.Port}",
           "database": "${DBName}",
           "username": "${DBMasterUsername}",
-          "password": "{{resolve:secretsmanager:${DBMasterPasswordSecretArn}:SecretString:password}}"
+          "password": "{{resolve:secretsmanager:${DBMasterPassword}:SecretString:password}}"
         }
       Tags:
         - Key: Name
@@ -192,36 +238,59 @@ Resources:
         - Key: ManagedBy
           Value: CloudFormation
 
-# ==============================================================================
-# Outputs
-# ==============================================================================
-Outputs:
-  DBEndpoint:
-    Description: RDS instance endpoint
-    Value: !GetAtt RDSInstance.Endpoint.Address
-    Export:
-      Name: !Sub ${ProjectName}-${Environment}-db-endpoint
+  # -------------------------------------------------------------------------
+  # Secret Rotation (Optional - for production)
+  # -------------------------------------------------------------------------
+  # SecretRotationSchedule:
+  #   Type: AWS::SecretsManager::RotationSchedule
+  #   Properties:
+  #     SecretId: !Ref DBMasterPassword
+  #     RotationLambdaARN: !GetAtt RotationLambda.Arn
+  #     RotationRules:
+  #       AutomaticallyAfterDays: 30
 
-  DBPort:
-    Description: RDS instance port
-    Value: !GetAtt RDSInstance.Endpoint.Port
+# ===========================================================================
+# Outputs
+# ===========================================================================
+Outputs:
+  DBInstanceId:
+    Description: RDS Instance ID
+    Value: !Ref DBInstance
     Export:
-      Name: !Sub ${ProjectName}-${Environment}-db-port
+      Name: !Sub ${ProjectName}-${Environment}-db-instance-id
+
+  DBEndpointAddress:
+    Description: RDS Endpoint Address
+    Value: !GetAtt DBInstance.Endpoint.Address
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-db-endpoint-address
+
+  DBEndpointPort:
+    Description: RDS Endpoint Port
+    Value: !GetAtt DBInstance.Endpoint.Port
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-db-endpoint-port
 
   DBName:
-    Description: Database name
+    Description: Database Name
     Value: !Ref DBName
     Export:
       Name: !Sub ${ProjectName}-${Environment}-db-name
 
   DBSecurityGroupId:
-    Description: Database security group ID
+    Description: RDS Security Group ID
     Value: !Ref DBSecurityGroup
     Export:
-      Name: !Sub ${ProjectName}-${Environment}-db-sg-id
+      Name: !Sub ${ProjectName}-${Environment}-rds-sg-id
 
-  AppDBSecretArn:
-    Description: Application database secret ARN
-    Value: !Ref AppDBSecret
+  DBMasterPasswordSecretArn:
+    Description: DB Master Password Secret ARN
+    Value: !Ref DBMasterPassword
     Export:
-      Name: !Sub ${ProjectName}-${Environment}-db-secret-arn
+      Name: !Sub ${ProjectName}-${Environment}-db-master-password-arn
+
+  DBConnectionStringSecretArn:
+    Description: DB Connection String Secret ARN
+    Value: !Ref DBConnectionString
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-db-connection-arn

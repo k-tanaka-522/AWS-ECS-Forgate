@@ -1,66 +1,158 @@
-[
-  {
-    "ParameterKey": "Environment",
-    "ParameterValue": "dev"
-  },
-  {
-    "ParameterKey": "ProjectName",
-    "ParameterValue": "sample-app"
-  },
-  {
-    "ParameterKey": "ServiceVPCCIDR",
-    "ParameterValue": "10.1.0.0/16"
-  },
-  {
-    "ParameterKey": "PublicSubnet1CIDR",
-    "ParameterValue": "10.1.1.0/24"
-  },
-  {
-    "ParameterKey": "PublicSubnet2CIDR",
-    "ParameterValue": "10.1.2.0/24"
-  },
-  {
-    "ParameterKey": "PrivateSubnet1CIDR",
-    "ParameterValue": "10.1.11.0/24"
-  },
-  {
-    "ParameterKey": "PrivateSubnet2CIDR",
-    "ParameterValue": "10.1.12.0/24"
-  },
-  {
-    "ParameterKey": "DatabaseSubnet1CIDR",
-    "ParameterValue": "10.1.21.0/24"
-  },
-  {
-    "ParameterKey": "DatabaseSubnet2CIDR",
-    "ParameterValue": "10.1.22.0/24"
-  },
-  {
-    "ParameterKey": "DBMasterUsername",
-    "ParameterValue": "postgres"
-  },
-  {
-    "ParameterKey": "DBMasterPasswordSecretArn",
-    "ParameterValue": "arn:aws:secretsmanager:ap-northeast-1:987654321098:secret:sample-app/dev/db-master-password-REPLACE"
-  },
-  {
-    "ParameterKey": "DBName",
-    "ParameterValue": "sampledb"
-  },
-  {
-    "ParameterKey": "PlatformAccountId",
-    "ParameterValue": "123456789012"
-  },
-  {
-    "ParameterKey": "TransitGatewayId",
-    "ParameterValue": "tgw-REPLACE_AFTER_PLATFORM_DEPLOYMENT"
-  },
-  {
-    "ParameterKey": "AlertEmail",
-    "ParameterValue": "dev-team@example.com"
-  },
-  {
-    "ParameterKey": "CriticalAlertEmail",
-    "ParameterValue": "ops-team@example.com"
-  }
-]
+{
+  "network": [
+    {
+      "ParameterKey": "ProjectName",
+      "ParameterValue": "sample-app"
+    },
+    {
+      "ParameterKey": "Environment",
+      "ParameterValue": "dev"
+    },
+    {
+      "ParameterKey": "ServiceVPCCIDR",
+      "ParameterValue": "10.1.0.0/16"
+    },
+    {
+      "ParameterKey": "TransitGatewayId",
+      "ParameterValue": "REPLACE_WITH_ACTUAL_TGW_ID"
+    }
+  ],
+  "database": [
+    {
+      "ParameterKey": "ProjectName",
+      "ParameterValue": "sample-app"
+    },
+    {
+      "ParameterKey": "Environment",
+      "ParameterValue": "dev"
+    },
+    {
+      "ParameterKey": "VpcId",
+      "ParameterValue": "REPLACE_WITH_ACTUAL_VPC_ID"
+    },
+    {
+      "ParameterKey": "DatabaseSubnet1Id",
+      "ParameterValue": "REPLACE_WITH_ACTUAL_DATABASE_SUBNET_1_ID"
+    },
+    {
+      "ParameterKey": "DatabaseSubnet2Id",
+      "ParameterValue": "REPLACE_WITH_ACTUAL_DATABASE_SUBNET_2_ID"
+    },
+    {
+      "ParameterKey": "DBInstanceClass",
+      "ParameterValue": "db.t3.medium"
+    },
+    {
+      "ParameterKey": "DBAllocatedStorage",
+      "ParameterValue": "100"
+    },
+    {
+      "ParameterKey": "DBMasterUsername",
+      "ParameterValue": "postgres"
+    },
+    {
+      "ParameterKey": "DBName",
+      "ParameterValue": "sampleappdb"
+    },
+    {
+      "ParameterKey": "DBBackupRetentionPeriod",
+      "ParameterValue": "7"
+    }
+  ],
+  "compute": [
+    {
+      "ParameterKey": "ProjectName",
+      "ParameterValue": "sample-app"
+    },
+    {
+      "ParameterKey": "Environment",
+      "ParameterValue": "dev"
+    },
+    {
+      "ParameterKey": "VpcId",
+      "ParameterValue": "REPLACE_WITH_ACTUAL_VPC_ID"
+    },
+    {
+      "ParameterKey": "PublicSubnet1Id",
+      "ParameterValue": "REPLACE_WITH_ACTUAL_PUBLIC_SUBNET_1_ID"
+    },
+    {
+      "ParameterKey": "PublicSubnet2Id",
+      "ParameterValue": "REPLACE_WITH_ACTUAL_PUBLIC_SUBNET_2_ID"
+    },
+    {
+      "ParameterKey": "PrivateSubnet1Id",
+      "ParameterValue": "REPLACE_WITH_ACTUAL_PRIVATE_SUBNET_1_ID"
+    },
+    {
+      "ParameterKey": "PrivateSubnet2Id",
+      "ParameterValue": "REPLACE_WITH_ACTUAL_PRIVATE_SUBNET_2_ID"
+    },
+    {
+      "ParameterKey": "DBEndpointAddress",
+      "ParameterValue": "REPLACE_WITH_ACTUAL_DB_ENDPOINT"
+    },
+    {
+      "ParameterKey": "DBEndpointPort",
+      "ParameterValue": "5432"
+    },
+    {
+      "ParameterKey": "DBName",
+      "ParameterValue": "sampleappdb"
+    },
+    {
+      "ParameterKey": "DBConnectionStringSecretArn",
+      "ParameterValue": "REPLACE_WITH_ACTUAL_DB_CONNECTION_SECRET_ARN"
+    },
+    {
+      "ParameterKey": "ECRRepositoryPublic",
+      "ParameterValue": "sample-app/public"
+    },
+    {
+      "ParameterKey": "ECRRepositoryAdmin",
+      "ParameterValue": "sample-app/admin"
+    },
+    {
+      "ParameterKey": "ECRRepositoryBatch",
+      "ParameterValue": "sample-app/batch"
+    }
+  ],
+  "monitoring": [
+    {
+      "ParameterKey": "ProjectName",
+      "ParameterValue": "sample-app"
+    },
+    {
+      "ParameterKey": "Environment",
+      "ParameterValue": "dev"
+    },
+    {
+      "ParameterKey": "ECSClusterName",
+      "ParameterValue": "REPLACE_WITH_ACTUAL_ECS_CLUSTER_NAME"
+    },
+    {
+      "ParameterKey": "PublicWebServiceName",
+      "ParameterValue": "REPLACE_WITH_ACTUAL_PUBLIC_WEB_SERVICE_NAME"
+    },
+    {
+      "ParameterKey": "AdminServiceName",
+      "ParameterValue": "REPLACE_WITH_ACTUAL_ADMIN_SERVICE_NAME"
+    },
+    {
+      "ParameterKey": "DBInstanceId",
+      "ParameterValue": "REPLACE_WITH_ACTUAL_DB_INSTANCE_ID"
+    },
+    {
+      "ParameterKey": "ALBFullName",
+      "ParameterValue": "REPLACE_WITH_ACTUAL_ALB_FULL_NAME"
+    },
+    {
+      "ParameterKey": "TargetGroupFullName",
+      "ParameterValue": "REPLACE_WITH_ACTUAL_TARGET_GROUP_FULL_NAME"
+    },
+    {
+      "ParameterKey": "AlertEmail",
+      "ParameterValue": "ops-team@example.com"
+    }
+  ]
+}

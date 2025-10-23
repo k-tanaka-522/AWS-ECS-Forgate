@@ -1,21 +1,34 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Platform Account - Connectivity Resources (Transit Gateway, Client VPN)'
+Description: 'Platform Account - Connectivity Stack (Transit Gateway, Client VPN)'
 
-# ==============================================================================
+# ===========================================================================
 # Parameters
-# ==============================================================================
+# ===========================================================================
 Parameters:
-  Environment:
-    Type: String
-    Description: Environment name
-
   ProjectName:
     Type: String
-    Description: Project name
+    Default: sample-app
+    Description: Project name for resource naming
 
-  PlatformVPCId:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - prod
+    Description: Environment name
+
+  VpcId:
     Type: String
     Description: Platform VPC ID
+
+  TgwSubnet1Id:
+    Type: String
+    Description: Transit Gateway Subnet 1 ID
+
+  TgwSubnet2Id:
+    Type: String
+    Description: Transit Gateway Subnet 2 ID
 
   PrivateSubnet1Id:
     Type: String
@@ -25,46 +38,38 @@ Parameters:
     Type: String
     Description: Private Subnet 2 ID
 
-  PrivateRouteTable1Id:
+  ClientVpnCidr:
     Type: String
-    Description: Private Route Table 1 ID
+    Default: 172.16.0.0/22
+    Description: Client VPN CIDR
 
-  PrivateRouteTable2Id:
+  ServerCertificateArn:
     Type: String
-    Description: Private Route Table 2 ID
+    Description: ACM Certificate ARN for VPN Server
 
-  ClientVPNServerCertificateArn:
+  ClientRootCertificateArn:
     Type: String
-    Description: ACM Certificate ARN for Client VPN server
-
-  ClientVPNClientCertificateArn:
-    Type: String
-    Description: ACM Certificate ARN for Client VPN client
-
-  ClientVPNTargetCIDR:
-    Type: String
-    Description: Client VPN target network CIDR
+    Description: ACM Certificate ARN for VPN Client
 
   ServiceAccountId:
     Type: String
-    Description: AWS Account ID for Service Account
+    Description: Service Account AWS Account ID for RAM sharing
 
-# ==============================================================================
+# ===========================================================================
 # Resources
-# ==============================================================================
+# ===========================================================================
 Resources:
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
   # Transit Gateway
-  # ----------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
   TransitGateway:
     Type: AWS::EC2::TransitGateway
     Properties:
-      Description: !Sub ${ProjectName}-${Environment} Transit Gateway for Multi-Account connectivity
       AmazonSideAsn: 64512
       DefaultRouteTableAssociation: enable
       DefaultRouteTablePropagation: enable
       DnsSupport: enable
-      VpnEcnSupport: enable
+      VpnEcmpSupport: enable
       Tags:
         - Key: Name
           Value: !Sub ${ProjectName}-${Environment}-tgw
@@ -73,15 +78,15 @@ Resources:
         - Key: ManagedBy
           Value: CloudFormation
 
-  # Platform VPC Attachment
-  PlatformVPCAttachment:
+  # Transit Gateway Attachment (Platform VPC)
+  TransitGatewayAttachment:
     Type: AWS::EC2::TransitGatewayAttachment
     Properties:
       TransitGatewayId: !Ref TransitGateway
-      VpcId: !Ref PlatformVPCId
+      VpcId: !Ref VpcId
       SubnetIds:
-        - !Ref PrivateSubnet1Id
-        - !Ref PrivateSubnet2Id
+        - !Ref TgwSubnet1Id
+        - !Ref TgwSubnet2Id
       Tags:
         - Key: Name
           Value: !Sub ${ProjectName}-${Environment}-platform-tgw-attachment
@@ -90,34 +95,16 @@ Resources:
         - Key: ManagedBy
           Value: CloudFormation
 
-  # Transit Gateway Route (Platform VPC Private Subnets)
-  TGWRoutePrivate1:
-    Type: AWS::EC2::Route
-    DependsOn: PlatformVPCAttachment
-    Properties:
-      RouteTableId: !Ref PrivateRouteTable1Id
-      DestinationCidrBlock: 10.1.0.0/16
-      TransitGatewayId: !Ref TransitGateway
-
-  TGWRoutePrivate2:
-    Type: AWS::EC2::Route
-    DependsOn: PlatformVPCAttachment
-    Properties:
-      RouteTableId: !Ref PrivateRouteTable2Id
-      DestinationCidrBlock: 10.1.0.0/16
-      TransitGatewayId: !Ref TransitGateway
-
-  # ----------------------------------------------------------------------------
   # Transit Gateway Resource Share (RAM)
-  # ----------------------------------------------------------------------------
   TransitGatewayResourceShare:
     Type: AWS::RAM::ResourceShare
     Properties:
       Name: !Sub ${ProjectName}-${Environment}-tgw-share
-      Principals:
-        - !Sub arn:aws:iam::${ServiceAccountId}:root
       ResourceArns:
         - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:transit-gateway/${TransitGateway}
+      Principals:
+        - !Sub arn:aws:iam::${ServiceAccountId}:root
+      AllowExternalPrincipals: false
       Tags:
         - Key: Name
           Value: !Sub ${ProjectName}-${Environment}-tgw-share
@@ -126,63 +113,77 @@ Resources:
         - Key: ManagedBy
           Value: CloudFormation
 
-  # ----------------------------------------------------------------------------
-  # Client VPN Endpoint
-  # ----------------------------------------------------------------------------
-  ClientVpnLogGroup:
-    Type: AWS::Logs::LogGroup
+  # -------------------------------------------------------------------------
+  # Client VPN
+  # -------------------------------------------------------------------------
+  # Client VPN Security Group
+  ClientVpnSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
     Properties:
-      LogGroupName: !Sub /aws/clientvpn/${ProjectName}-${Environment}
-      RetentionInDays: 7
-
-  ClientVpnLogStream:
-    Type: AWS::Logs::LogStream
-    Properties:
-      LogGroupName: !Ref ClientVpnLogGroup
-      LogStreamName: connection-log
-
-  ClientVpnEndpoint:
-    Type: AWS::EC2::ClientVpnEndpoint
-    Properties:
-      Description: !Sub ${ProjectName}-${Environment} Client VPN Endpoint
-      ClientCidrBlock: !Ref ClientVPNTargetCIDR
-      ServerCertificateArn: !Ref ClientVPNServerCertificateArn
-      AuthenticationOptions:
-        - Type: certificate-authentication
-          MutualAuthentication:
-            ClientRootCertificateChainArn: !Ref ClientVPNClientCertificateArn
-      ConnectionLogOptions:
-        Enabled: true
-        CloudwatchLogGroup: !Ref ClientVpnLogGroup
-        CloudwatchLogStream: !Ref ClientVpnLogStream
-      SplitTunnel: true
-      VpnPort: 443
-      TransportProtocol: tcp
-      DnsServers:
-        - 10.0.0.2
+      GroupName: !Sub ${ProjectName}-${Environment}-vpn-sg
+      GroupDescription: Security Group for Client VPN Endpoints
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        # Allow all traffic from VPN CIDR
+        - IpProtocol: -1
+          CidrIp: !Ref ClientVpnCidr
+          Description: Allow all traffic from VPN clients
+      SecurityGroupEgress:
+        # Allow all outbound traffic
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic
       Tags:
         - Key: Name
-          Value: !Sub ${ProjectName}-${Environment}-client-vpn
+          Value: !Sub ${ProjectName}-${Environment}-vpn-sg
         - Key: Environment
           Value: !Ref Environment
         - Key: ManagedBy
           Value: CloudFormation
 
-  # Client VPN Target Network Association
+  # Client VPN Endpoint
+  ClientVpnEndpoint:
+    Type: AWS::EC2::ClientVpnEndpoint
+    Properties:
+      Description: !Sub ${ProjectName}-${Environment}-vpn-endpoint
+      ClientCidrBlock: !Ref ClientVpnCidr
+      ServerCertificateArn: !Ref ServerCertificateArn
+      AuthenticationOptions:
+        - Type: certificate-authentication
+          MutualAuthentication:
+            ClientRootCertificateChainArn: !Ref ClientRootCertificateArn
+      ConnectionLogOptions:
+        Enabled: false
+      SplitTunnel: true
+      VpcId: !Ref VpcId
+      SecurityGroupIds:
+        - !Ref ClientVpnSecurityGroup
+      TagSpecifications:
+        - ResourceType: client-vpn-endpoint
+          Tags:
+            - Key: Name
+              Value: !Sub ${ProjectName}-${Environment}-vpn-endpoint
+            - Key: Environment
+              Value: !Ref Environment
+            - Key: ManagedBy
+              Value: CloudFormation
+
+  # Client VPN Target Network Association (Private Subnet 1)
   ClientVpnTargetNetworkAssociation1:
     Type: AWS::EC2::ClientVpnTargetNetworkAssociation
     Properties:
       ClientVpnEndpointId: !Ref ClientVpnEndpoint
       SubnetId: !Ref PrivateSubnet1Id
 
+  # Client VPN Target Network Association (Private Subnet 2)
   ClientVpnTargetNetworkAssociation2:
     Type: AWS::EC2::ClientVpnTargetNetworkAssociation
     Properties:
       ClientVpnEndpointId: !Ref ClientVpnEndpoint
       SubnetId: !Ref PrivateSubnet2Id
 
-  # Client VPN Authorization Rules
-  ClientVpnAuthorizationRulePlatformVPC:
+  # Client VPN Authorization Rule (Platform VPC)
+  ClientVpnAuthorizationRulePlatform:
     Type: AWS::EC2::ClientVpnAuthorizationRule
     Properties:
       ClientVpnEndpointId: !Ref ClientVpnEndpoint
@@ -190,38 +191,51 @@ Resources:
       AuthorizeAllGroups: true
       Description: Allow access to Platform VPC
 
-  ClientVpnAuthorizationRuleServiceVPC:
+  # Client VPN Authorization Rule (Service VPC)
+  ClientVpnAuthorizationRuleService:
     Type: AWS::EC2::ClientVpnAuthorizationRule
     Properties:
       ClientVpnEndpointId: !Ref ClientVpnEndpoint
       TargetNetworkCidr: 10.1.0.0/16
       AuthorizeAllGroups: true
-      Description: Allow access to Service VPC via Transit Gateway
+      Description: Allow access to Service VPC
 
-  # Client VPN Route (to Service VPC via Transit Gateway)
-  ClientVpnRouteToServiceVPC:
+  # Client VPN Route (Service VPC via Transit Gateway)
+  ClientVpnRouteToService:
     Type: AWS::EC2::ClientVpnRoute
     DependsOn:
       - ClientVpnTargetNetworkAssociation1
       - ClientVpnTargetNetworkAssociation2
     Properties:
       ClientVpnEndpointId: !Ref ClientVpnEndpoint
-      TargetVpcSubnetId: !Ref PrivateSubnet1Id
       DestinationCidrBlock: 10.1.0.0/16
+      TargetVpcSubnetId: !Ref PrivateSubnet1Id
       Description: Route to Service VPC via Transit Gateway
 
-# ==============================================================================
+# ===========================================================================
 # Outputs
-# ==============================================================================
+# ===========================================================================
 Outputs:
   TransitGatewayId:
     Description: Transit Gateway ID
     Value: !Ref TransitGateway
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-tgw-id
 
-  TransitGatewayShareArn:
-    Description: Transit Gateway Resource Share ARN
-    Value: !GetAtt TransitGatewayResourceShare.Arn
+  TransitGatewayAttachmentId:
+    Description: Transit Gateway Attachment ID (Platform VPC)
+    Value: !Ref TransitGatewayAttachment
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-platform-tgw-attachment-id
 
   ClientVpnEndpointId:
     Description: Client VPN Endpoint ID
     Value: !Ref ClientVpnEndpoint
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-vpn-endpoint-id
+
+  ClientVpnSecurityGroupId:
+    Description: Client VPN Security Group ID
+    Value: !Ref ClientVpnSecurityGroup
+    Export:
+      Name: !Sub ${ProjectName}-${Environment}-vpn-sg-id
