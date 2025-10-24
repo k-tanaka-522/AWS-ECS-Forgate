@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git checkout -b phase-3.0-mcp-integration)",
+      "Bash(git checkout phase-3.0-mcp-integration)",
+      "Bash(git merge main --no-edit)",
+      "Bash(git checkout 4becc0c -- .claude/docs/30_integrations/)",
+      "Bash(git clone:*)",
+      "Bash(rm:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
